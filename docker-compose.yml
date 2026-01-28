@@ -1,0 +1,252 @@
+# Metaverse Advertising Platform - Production Docker Compose
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: metaverse-ads-db
+    environment:
+      POSTGRES_DB: metaverse_ads_prod
+      POSTGRES_USER: metaverse_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metaverse_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - metaverse-network
+
+  # Redis for Analytics & Caching
+  redis:
+    image: redis:7-alpine
+    container_name: metaverse-ads-redis
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - metaverse-network
+
+  # Hardhat Blockchain Node (Development)
+  blockchain:
+    build:
+      context: ./blockchain
+      dockerfile: Dockerfile
+    container_name: metaverse-ads-blockchain
+    ports:
+      - "8545:8545"
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./blockchain:/app
+      - blockchain_data:/app/artifacts
+    networks:
+      - metaverse-network
+
+  # API Server
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: metaverse-ads-api
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: production
+      METAVERSE_ENV: ${METAVERSE_ENV:-development}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: metaverse_ads_prod
+      DB_USER: metaverse_user
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      ETHEREUM_RPC_URL: http://blockchain:8545
+      MARKETPLACE_CONTRACT_ADDRESS: ${MARKETPLACE_CONTRACT_ADDRESS}
+      TOKEN_CONTRACT_ADDRESS: ${TOKEN_CONTRACT_ADDRESS}
+      JWT_SECRET: ${JWT_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      blockchain:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - metaverse-network
+    restart: unless-stopped
+
+  # Frontend Applications
+  frontend-user:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        APP_TYPE: user
+    container_name: metaverse-ads-user-app
+    ports:
+      - "3000:80"
+    environment:
+      VITE_API_URL: http://api:3001
+    depends_on:
+      - api
+    networks:
+      - metaverse-network
+    restart: unless-stopped
+
+  frontend-advertiser:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        APP_TYPE: advertiser
+    container_name: metaverse-ads-advertiser-app
+    ports:
+      - "3002:80"
+    environment:
+      VITE_API_URL: http://api:3001
+    depends_on:
+      - api
+    networks:
+      - metaverse-network
+    restart: unless-stopped
+
+  frontend-publisher:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        APP_TYPE: publisher
+    container_name: metaverse-ads-publisher-app
+    ports:
+      - "3003:80"
+    environment:
+      VITE_API_URL: http://api:3001
+    depends_on:
+      - api
+    networks:
+      - metaverse-network
+    restart: unless-stopped
+
+  # NGINX Load Balancer & Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: metaverse-ads-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - api
+      - frontend-user
+      - frontend-advertiser
+      - frontend-publisher
+    networks:
+      - metaverse-network
+    restart: unless-stopped
+
+  # Prometheus Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: metaverse-ads-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    networks:
+      - metaverse-network
+    restart: unless-stopped
+
+  # Grafana Dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: metaverse-ads-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - prometheus
+    networks:
+      - metaverse-network
+    restart: unless-stopped
+
+  # Loki Log Aggregation
+  loki:
+    image: grafana/loki:latest
+    container_name: metaverse-ads-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - metaverse-network
+    restart: unless-stopped
+
+  # Promtail Log Collector
+  promtail:
+    image: grafana/promtail:latest
+    container_name: metaverse-ads-promtail
+    volumes:
+      - ./monitoring/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    networks:
+      - metaverse-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  blockchain_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  loki_data:
+    driver: local
+
+networks:
+  metaverse-network:
+    driver: bridge

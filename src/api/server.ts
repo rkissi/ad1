@@ -1,0 +1,575 @@
+// Production API Server for Metaverse Advertising Platform
+import express, { Express, Request, Response, NextFunction } from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import compression from 'compression';
+import rateLimit from 'express-rate-limit';
+import DatabaseService from '../lib/database';
+import { eventTracker } from '../lib/event-tracker';
+import SmartContractService from '../lib/smart-contracts';
+import TransactionManager from '../lib/transaction-manager';
+import FraudPreventionService from '../lib/fraud-prevention';
+import AnalyticsDashboardService from '../lib/analytics-dashboard';
+import { environmentManager, logger } from '../lib/environment-manager';
+import { paymentRouter } from './payment-routes';
+import adminRouter from './admin-routes';
+
+export class ApiServer {
+  private app: Express;
+  private db: DatabaseService;
+  private contractService: SmartContractService;
+  private transactionManager: TransactionManager;
+  private fraudService: FraudPreventionService;
+  private analyticsService: AnalyticsDashboardService;
+  private port: number;
+
+  constructor() {
+    this.app = express();
+    this.port = environmentManager.getApiConfig().port;
+    
+    // Initialize services
+    this.db = new DatabaseService();
+    this.contractService = new SmartContractService();
+    this.transactionManager = new TransactionManager(this.db, this.contractService);
+    this.fraudService = new FraudPreventionService(this.db);
+    this.analyticsService = new AnalyticsDashboardService(
+      this.db,
+      this.transactionManager,
+      this.fraudService
+    );
+
+    this.setupMiddleware();
+    this.setupRoutes();
+    this.setupErrorHandling();
+  }
+
+  private setupMiddleware(): void {
+    // Security middleware
+    this.app.use(helmet());
+    
+    // CORS configuration
+    const corsOptions = {
+      origin: environmentManager.getApiConfig().corsOrigins,
+      credentials: true
+    };
+    this.app.use(cors(corsOptions));
+
+    // Compression
+    this.app.use(compression());
+
+    // Body parsing
+    this.app.use(express.json({ limit: '10mb' }));
+    this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+    // Rate limiting
+    const limiter = rateLimit({
+      windowMs: environmentManager.getApiConfig().rateLimiting.windowMs,
+      max: environmentManager.getApiConfig().rateLimiting.maxRequests,
+      message: 'Too many requests from this IP, please try again later.'
+    });
+    this.app.use('/api/', limiter);
+
+    // Request logging
+    this.app.use((req, res, next) => {
+      logger.info(`${req.method} ${req.path}`, {
+        ip: req.ip,
+        userAgent: req.get('user-agent')
+      });
+      next();
+    });
+  }
+
+  private setupRoutes(): void {
+    // Health check
+    this.app.get('/health', async (req, res) => {
+      const health = await environmentManager.performHealthCheck();
+      res.status(health.status === 'healthy' ? 200 : 503).json(health);
+    });
+
+    // API v1 routes
+    const apiRouter = express.Router();
+
+    // ==================== AUTHENTICATION ====================
+    apiRouter.post('/auth/register', async (req, res, next) => {
+      try {
+        const { email, password, name, role = 'user' } = req.body;
+        
+        // Validate input
+        if (!email || !password) {
+          return res.status(400).json({ 
+            success: false,
+            error: { message: 'Email and password are required' }
+          });
+        }
+
+        // Check if user exists
+        const existingUser = await this.db.getUserByEmail(email);
+        if (existingUser) {
+          return res.status(409).json({ 
+            success: false,
+            error: { message: 'User already exists' }
+          });
+        }
+
+        // Create user (password hashing would be done here)
+        const userDid = `did:${role}:${Date.now()}`;
+        const user = await this.db.createUser({
+          did: userDid,
+          email,
+          passwordHash: password, // In production, use bcrypt
+          displayName: name || email.split('@')[0],
+          interests: [],
+          rewardPreferences: {},
+          consents: {},
+          pdsUrl: ''
+        });
+
+        const userData = {
+          did: user.did,
+          email: user.email,
+          displayName: user.displayName,
+          role: role,
+          interests: user.interests || []
+        };
+
+        res.status(201).json({ 
+          success: true,
+          data: {
+            user: userData,
+            token: `jwt-token-${userDid}`
+          }
+        });
+      } catch (error: any) {
+        console.error('Registration error:', error);
+        res.status(500).json({
+          success: false,
+          error: { message: error.message || 'Registration failed' }
+        });
+      }
+    });
+
+    apiRouter.post('/auth/login', async (req, res, next) => {
+      try {
+        const { email, password } = req.body;
+        
+        if (!email || !password) {
+          return res.status(400).json({
+            success: false,
+            error: { message: 'Email and password are required' }
+          });
+        }
+
+        const user = await this.db.getUserByEmail(email);
+        if (!user || user.passwordHash !== password) {
+          return res.status(401).json({ 
+            success: false,
+            error: { message: 'Invalid email or password' }
+          });
+        }
+
+        const userData = {
+          did: user.did,
+          email: user.email,
+          displayName: user.displayName,
+          role: user.did.includes('advertiser') ? 'advertiser' : 
+                user.did.includes('publisher') ? 'publisher' : 
+                user.did.includes('admin') ? 'admin' : 'user',
+          interests: user.interests || []
+        };
+
+        res.json({ 
+          success: true,
+          data: {
+            user: userData,
+            token: `jwt-token-${user.did}`
+          }
+        });
+      } catch (error: any) {
+        console.error('Login error:', error);
+        res.status(500).json({
+          success: false,
+          error: { message: error.message || 'Login failed' }
+        });
+      }
+    });
+
+    // ==================== CAMPAIGNS ====================
+    apiRouter.post('/campaigns', async (req, res, next) => {
+      try {
+        const campaign = await this.db.createCampaign(req.body);
+        res.status(201).json(campaign);
+      } catch (error) {
+        next(error);
+      }
+    });
+
+    apiRouter.get('/campaigns/:id', async (req, res, next) => {
+      try {
+        const campaign = await this.db.getCampaign(req.params.id);
+        if (!campaign) {
+          return res.status(404).json({ error: 'Campaign not found' });
+        }
+        res.json(campaign);
+      } catch (error) {
+        next(error);
+      }
+    });
+
+    apiRouter.get('/campaigns', async (req, res, next) => {
+      try {
+        const { advertiser } = req.query;
+        const campaigns = advertiser 
+          ? await this.db.getCampaignsByAdvertiser(advertiser as string)
+          : await this.db.getActiveCampaigns();
+        res.json(campaigns);
+      } catch (error) {
+        next(error);
+      }
+    });
+
+    apiRouter.patch('/campaigns/:id', async (req, res, next) => {
+      try {
+        const campaign = await this.db.updateCampaign(req.params.id, req.body);
+        if (!campaign) {
+          return res.status(404).json({ error: 'Campaign not found' });
+        }
+        res.json(campaign);
+      } catch (error) {
+        next(error);
+      }
+    });
+
+    // ==================== BLOCKCHAIN ESCROW ====================
+    apiRouter.post('/campaigns/:id/lock-funds', async (req, res, next) => {
+      try {
+        const campaign = await this.db.getCampaign(req.params.id);
+        if (!campaign) {
+          return res.status(404).json({ error: 'Campaign not found' });
+        }
+
+        const transaction = await this.transactionManager.depositCampaignFunds(
+          campaign.id,
+          campaign.budget.toString(),
+          campaign.advertiser
+        );
+
+        res.json(transaction);
+      } catch (error) {
+        next(error);
+      }
+    });
+
+    apiRouter.post('/campaigns/:id/release-funds', async (req, res, next) => {
+      try {
+        const { recipients } = req.body;
+        
+        const transaction = await this.transactionManager.executeBatchPayouts({
+          campaignId: req.params.id,
+          recipients,
+          totalAmount: recipients.reduce((sum: number, r: any) => sum + parseFloat(r.amount), 0).toString(),
+          eventIds: []
+        });
+
+        res.json(transaction);
+      } catch (error) {
+        next(error);
+      }
+    });
+
+    // ==================== EVENT TRACKING ====================
+    apiRouter.post('/events/impression', async (req, res, next) => {
+      try {
+        const event = req.body;
+        
+        // Fraud validation
+        const validation = await this.fraudService.validateEvent({
+          type: 'impression',
+          sessionId: event.sessionId,
+          userDid: event.userDid,
+          publisherDid: event.publisherDid,
+          campaignId: event.campaignId,
+          ipAddress: req.ip || '0.0.0.0',
+          userAgent: req.get('user-agent') || '',
+          timestamp: new Date().toISOString()
+        });
+
+        if (!validation.isValid) {
+          return res.status(403).json({ 
+            error: 'Event blocked by fraud prevention',
+            flags: validation.flags 
+          });
+        }
+
+        await eventTracker.trackEvent({
+          type: 'impression',
+          adId: event.adId,
+          campaignId: event.campaignId,
+          userDid: event.userDid,
+          publisherDid: event.publisherDid,
+          slotId: event.slotId,
+          metadata: event.metadata || {}
+        });
+
+        res.status(201).json({ success: true, riskScore: validation.riskScore });
+      } catch (error) {
+        next(error);
+      }
+    });
+
+    apiRouter.post('/events/click', async (req, res, next) => {
+      try {
+        const event = req.body;
+        
+        const validation = await this.fraudService.validateEvent({
+          type: 'click',
+          sessionId: event.sessionId,
+          userDid: event.userDid,
+          publisherDid: event.publisherDid,
+          campaignId: event.campaignId,
+          ipAddress: req.ip || '0.0.0.0',
+          userAgent: req.get('user-agent') || '',
+          timestamp: new Date().toISOString()
+        });
+
+        if (!validation.isValid) {
+          return res.status(403).json({ 
+            error: 'Event blocked by fraud prevention',
+            flags: validation.flags 
+          });
+        }
+
+        await eventTracker.trackEvent({
+          type: 'click',
+          adId: event.adId,
+          campaignId: event.campaignId,
+          userDid: event.userDid,
+          publisherDid: event.publisherDid,
+          slotId: event.slotId,
+          metadata: event.metadata || {}
+        });
+
+        res.status(201).json({ success: true, riskScore: validation.riskScore });
+      } catch (error) {
+        next(error);
+      }
+    });
+
+    apiRouter.post('/events/batch', async (req, res, next) => {
+      try {
+        const { events } = req.body;
+        await eventTracker.trackEventBatch(events);
+        res.status(201).json({ success: true, count: events.length });
+      } catch (error) {
+        next(error);
+      }
+    });
+
+    // ==================== ANALYTICS ====================
+    apiRouter.get('/analytics/dashboard', async (req, res, next) => {
+      try {
+        const metrics = await this.analyticsService.getDashboardMetrics();
+        res.json(metrics);
+      } catch (error) {
+        next(error);
+      }
+    });
+
+    apiRouter.get('/analytics/campaigns/:id', async (req, res, next) => {
+      try {
+        const performance = await this.analyticsService.getCampaignPerformance(req.params.id);
+        res.json(performance);
+      } catch (error) {
+        next(error);
+      }
+    });
+
+    apiRouter.get('/analytics/publishers/:did', async (req, res, next) => {
+      try {
+        const performance = await this.analyticsService.getPublisherPerformance(req.params.did);
+        res.json(performance);
+      } catch (error) {
+        next(error);
+      }
+    });
+
+    apiRouter.get('/analytics/fraud/alerts', async (req, res, next) => {
+      try {
+        const alerts = await this.fraudService.getActiveAlerts();
+        res.json(alerts);
+      } catch (error) {
+        next(error);
+      }
+    });
+
+    apiRouter.get('/analytics/fraud/stats', async (req, res, next) => {
+      try {
+        const stats = await this.fraudService.getFraudStats();
+        res.json(stats);
+      } catch (error) {
+        next(error);
+      }
+    });
+
+    // ==================== MARKETPLACE ====================
+    apiRouter.post('/marketplace/match', async (req, res, next) => {
+      try {
+        const { slot, publisherDid, userDid } = req.body;
+        
+        // Get active campaigns
+        const campaigns = await this.db.getActiveCampaigns();
+        
+        // Simple matching logic (in production, use sophisticated algorithm)
+        const matchedCampaign = campaigns.find(c => 
+          c.audienceSpec.interests.some((interest: string) => 
+            slot.context?.keywords?.includes(interest)
+          )
+        );
+
+        if (!matchedCampaign) {
+          return res.json({ matched: false });
+        }
+
+        res.json({
+          matched: true,
+          ad: {
+            id: `ad_${matchedCampaign.id}_${Date.now()}`,
+            campaignId: matchedCampaign.id,
+            creative: matchedCampaign.creativeManifest,
+            bidAmount: 0.01
+          }
+        });
+      } catch (error) {
+        next(error);
+      }
+    });
+
+    // ==================== CONSENT ====================
+    apiRouter.post('/consent/record', async (req, res, next) => {
+      try {
+        const { userDid, scope, campaignId } = req.body;
+        
+        const transaction = await this.transactionManager.recordConsent(
+          userDid,
+          scope,
+          campaignId
+        );
+
+        res.status(201).json(transaction);
+      } catch (error) {
+        next(error);
+      }
+    });
+
+    apiRouter.get('/consent/:userDid', async (req, res, next) => {
+      try {
+        const consents = await this.db.getConsentsByUser(req.params.userDid);
+        res.json(consents);
+      } catch (error) {
+        next(error);
+      }
+    });
+
+    // Mount API router
+    this.app.use('/api/v1', apiRouter);
+
+    // Mount routers
+    this.app.use('/api/v1/payments', paymentRouter);
+    this.app.use('/api/v1/admin', adminRouter);
+
+    // Metrics endpoint
+    this.app.get('/metrics', async (req, res) => {
+      // Prometheus-compatible metrics
+      const metrics = await this.analyticsService.getDashboardMetrics();
+      res.set('Content-Type', 'text/plain');
+      res.send(`
+# HELP metaverse_ads_impressions_total Total number of ad impressions
+# TYPE metaverse_ads_impressions_total counter
+metaverse_ads_impressions_total ${metrics.performance.impressions}
+
+# HELP metaverse_ads_clicks_total Total number of ad clicks
+# TYPE metaverse_ads_clicks_total counter
+metaverse_ads_clicks_total ${metrics.performance.clicks}
+
+# HELP metaverse_ads_conversions_total Total number of conversions
+# TYPE metaverse_ads_conversions_total counter
+metaverse_ads_conversions_total ${metrics.performance.conversions}
+
+# HELP metaverse_ads_active_campaigns Number of active campaigns
+# TYPE metaverse_ads_active_campaigns gauge
+metaverse_ads_active_campaigns ${metrics.overview.activeCampaigns}
+
+# HELP metaverse_ads_fraud_alerts_total Total fraud alerts
+# TYPE metaverse_ads_fraud_alerts_total counter
+metaverse_ads_fraud_alerts_total ${metrics.fraud.totalAlerts}
+      `);
+    });
+  }
+
+  private setupErrorHandling(): void {
+    // 404 handler
+    this.app.use((req, res) => {
+      res.status(404).json({ error: 'Not found' });
+    });
+
+    // Global error handler
+    this.app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+      logger.error('API Error:', err);
+      
+      res.status(500).json({
+        error: environmentManager.isProduction() 
+          ? 'Internal server error' 
+          : err.message,
+        stack: environmentManager.isDevelopment() ? err.stack : undefined
+      });
+    });
+  }
+
+  async start(): Promise<void> {
+    try {
+      // Initialize services
+      await this.db.initialize();
+      await this.transactionManager.initialize();
+      await this.fraudService.initialize();
+
+      // Start server
+      this.app.listen(this.port, () => {
+        logger.info(`🚀 API Server running on port ${this.port}`);
+        logger.info(`📊 Environment: ${environmentManager.getCurrentEnvironment()}`);
+        logger.info(`🔗 Health check: http://localhost:${this.port}/health`);
+        logger.info(`📈 Metrics: http://localhost:${this.port}/metrics`);
+      });
+    } catch (error) {
+      logger.error('Failed to start API server:', error);
+      process.exit(1);
+    }
+  }
+
+  async stop(): Promise<void> {
+    logger.info('Shutting down API server...');
+    
+    await this.transactionManager.close();
+    await eventTracker.close();
+    await this.db.close();
+    
+    logger.info('API server stopped');
+  }
+}
+
+// Start server if run directly
+if (require.main === module) {
+  const server = new ApiServer();
+  server.start();
+
+  // Graceful shutdown
+  process.on('SIGTERM', async () => {
+    await server.stop();
+    process.exit(0);
+  });
+
+  process.on('SIGINT', async () => {
+    await server.stop();
+    process.exit(0);
+  });
+}
+
+export default ApiServer;
