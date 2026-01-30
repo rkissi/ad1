@@ -43,6 +43,33 @@ Deno.serve(async (req) => {
       )
     }
 
+    // Basic bot detection
+    const userAgent = req.headers.get('user-agent') || ''
+    const botPatterns = [/bot/i, /crawler/i, /spider/i, /headless/i, /externalhit/i]
+    if (botPatterns.some(pattern => pattern.test(userAgent))) {
+      return new Response(
+        JSON.stringify({ error: 'Bot traffic detected' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403 }
+      )
+    }
+
+    // Idempotency check
+    if (adId) {
+      const { data: existingEvent } = await supabase
+        .from('events')
+        .select('id')
+        .eq('ad_id', adId)
+        .eq('type', type)
+        .maybeSingle()
+
+      if (existingEvent) {
+        return new Response(
+          JSON.stringify({ success: true, eventId: existingEvent.id, message: 'Duplicate event ignored' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+        )
+      }
+    }
+
     // Validate event type
     const validTypes = ['impression', 'click', 'conversion']
     if (!validTypes.includes(type)) {
@@ -50,6 +77,44 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: 'Invalid event type' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
       )
+    }
+
+    // Rate limiting
+    const sessionId = url.searchParams.get('sessionId') || adId || 'unknown'
+    const { data: sessionData } = await supabase
+      .from('fraud_sessions')
+      .select('*')
+      .eq('session_id', sessionId)
+      .maybeSingle()
+
+    const now = new Date()
+    if (sessionData) {
+      const lastEventAt = new Date(sessionData.last_event_at)
+      const fiveMinsAgo = new Date(now.getTime() - 5 * 60 * 1000)
+      const oneMinAgo = new Date(now.getTime() - 1 * 60 * 1000)
+
+      if (type === 'click' && sessionData.click_count >= 10 && lastEventAt > fiveMinsAgo) {
+        return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429, headers: corsHeaders })
+      }
+      if (type === 'impression' && sessionData.impression_count >= 50 && lastEventAt > oneMinAgo) {
+        return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429, headers: corsHeaders })
+      }
+
+      await supabase.from('fraud_sessions').update({
+        click_count: type === 'click' ? sessionData.click_count + 1 : sessionData.click_count,
+        impression_count: type === 'impression' ? sessionData.impression_count + 1 : sessionData.impression_count,
+        last_event_at: now.toISOString()
+      }).eq('session_id', sessionId)
+    } else {
+      // Use adId as fallback session if not provided, for simplicity in MVP
+      const { error: sessionError } = await supabase.from('fraud_sessions').insert({
+        session_id: sessionId,
+        user_id: userId || null,
+        click_count: type === 'click' ? 1 : 0,
+        impression_count: type === 'impression' ? 1 : 0,
+        last_event_at: now.toISOString()
+      })
+      if (sessionError) console.error('Error creating fraud session:', sessionError)
     }
 
     // Get campaign to check budget and payout rules

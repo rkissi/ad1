@@ -156,4 +156,319 @@ export class EventTracker {
     pipeline.hset(campaignKey, 'last_updated', event.timestamp!);
 
     // Update daily campaign metrics
-    const campaignDailyKey = `metrics:campaign:${event.campaignId}:${dateKey}`;\n    pipeline.hincrby(campaignDailyKey, event.type, 1);\n    pipeline.expire(campaignDailyKey, 86400 * 90); // Keep daily metrics for 90 days\n\n    // Update publisher metrics\n    const publisherKey = `metrics:publisher:${event.publisherDid}`;\n    pipeline.hincrby(publisherKey, event.type, 1);\n    pipeline.hincrby(publisherKey, 'total_events', 1);\n    pipeline.hset(publisherKey, 'last_updated', event.timestamp!);\n\n    // Update user interaction tracking (for frequency capping)\n    const userInteractionKey = `user:${event.userDid}:campaign:${event.campaignId}`;\n    pipeline.hincrby(userInteractionKey, event.type, 1);\n    pipeline.expire(userInteractionKey, 86400 * 7); // Keep user interactions for 7 days\n\n    // Add to real-time event stream\n    const streamKey = `stream:events:${event.type}`;\n    pipeline.xadd(streamKey, 'MAXLEN', '~', '10000', '*', \n      'campaignId', event.campaignId,\n      'publisherDid', event.publisherDid,\n      'timestamp', event.timestamp!,\n      'metadata', JSON.stringify(event.metadata)\n    );\n\n    // Execute all Redis operations\n    await pipeline.exec();\n\n    console.log(`✅ Event tracked: ${event.type} for campaign ${event.campaignId}`);\n  }\n\n  /**\n   * Flush buffered events to Redis\n   */\n  private async flushEventBuffer(): Promise<void> {\n    if (this.eventBuffer.length === 0 || !this.isConnected) {\n      return;\n    }\n\n    const eventsToFlush = [...this.eventBuffer];\n    this.eventBuffer = [];\n\n    try {\n      await Promise.all(eventsToFlush.map(event => this.processEventImmediate(event)));\n      console.log(`✅ Flushed ${eventsToFlush.length} buffered events`);\n    } catch (error) {\n      console.error('Failed to flush events, re-buffering:', error);\n      this.eventBuffer.unshift(...eventsToFlush);\n    }\n  }\n\n  /**\n   * Get campaign metrics\n   */\n  async getCampaignMetrics(campaignId: string): Promise<CampaignMetrics> {\n    if (!this.isConnected) {\n      return this.getMockCampaignMetrics(campaignId);\n    }\n\n    try {\n      const metricsKey = `metrics:campaign:${campaignId}`;\n      const metrics = await this.redis.hgetall(metricsKey);\n\n      const impressions = parseInt(metrics.impression || '0');\n      const clicks = parseInt(metrics.click || '0');\n      const conversions = parseInt(metrics.conversion || '0');\n      const spent = parseFloat(metrics.spent || '0');\n\n      return {\n        campaignId,\n        impressions,\n        clicks,\n        conversions,\n        ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,\n        cvr: clicks > 0 ? (conversions / clicks) * 100 : 0,\n        revenue: spent,\n        uniqueUsers: parseInt(metrics.unique_users || '0'),\n        spent,\n        remainingBudget: parseFloat(metrics.remaining_budget || '0'),\n        averageCpm: impressions > 0 ? (spent / impressions) * 1000 : 0,\n        averageCpc: clicks > 0 ? spent / clicks : 0,\n        averageCpa: conversions > 0 ? spent / conversions : 0\n      };\n    } catch (error) {\n      console.error('Failed to get campaign metrics:', error);\n      return this.getMockCampaignMetrics(campaignId);\n    }\n  }\n\n  /**\n   * Get publisher metrics\n   */\n  async getPublisherMetrics(publisherId: string): Promise<PublisherMetrics> {\n    if (!this.isConnected) {\n      return this.getMockPublisherMetrics(publisherId);\n    }\n\n    try {\n      const metricsKey = `metrics:publisher:${publisherId}`;\n      const metrics = await this.redis.hgetall(metricsKey);\n\n      const impressions = parseInt(metrics.impression || '0');\n      const clicks = parseInt(metrics.click || '0');\n      const conversions = parseInt(metrics.conversion || '0');\n      const earnings = parseFloat(metrics.earnings || '0');\n\n      return {\n        publisherId,\n        impressions,\n        clicks,\n        conversions,\n        ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,\n        cvr: clicks > 0 ? (conversions / clicks) * 100 : 0,\n        revenue: earnings,\n        uniqueUsers: parseInt(metrics.unique_users || '0'),\n        totalEarnings: earnings,\n        averageRpm: impressions > 0 ? (earnings / impressions) * 1000 : 0,\n        fillRate: parseFloat(metrics.fill_rate || '0')\n      };\n    } catch (error) {\n      console.error('Failed to get publisher metrics:', error);\n      return this.getMockPublisherMetrics(publisherId);\n    }\n  }\n\n  /**\n   * Get global platform metrics\n   */\n  async getGlobalMetrics(): Promise<EventMetrics & { totalCampaigns: number; totalPublishers: number }> {\n    if (!this.isConnected) {\n      return {\n        impressions: 12500,\n        clicks: 875,\n        conversions: 43,\n        ctr: 7.0,\n        cvr: 4.9,\n        revenue: 1250.75,\n        uniqueUsers: 8900,\n        totalCampaigns: 25,\n        totalPublishers: 12\n      };\n    }\n\n    try {\n      // Get all campaign keys\n      const campaignKeys = await this.redis.keys('metrics:campaign:*');\n      const publisherKeys = await this.redis.keys('metrics:publisher:*');\n\n      let totalImpressions = 0;\n      let totalClicks = 0;\n      let totalConversions = 0;\n      let totalRevenue = 0;\n      const uniqueUsers = new Set<string>();\n\n      // Aggregate campaign metrics\n      for (const key of campaignKeys) {\n        if (key.includes(':20')) continue; // Skip daily metrics\n        const metrics = await this.redis.hgetall(key);\n        totalImpressions += parseInt(metrics.impression || '0');\n        totalClicks += parseInt(metrics.click || '0');\n        totalConversions += parseInt(metrics.conversion || '0');\n        totalRevenue += parseFloat(metrics.spent || '0');\n      }\n\n      return {\n        impressions: totalImpressions,\n        clicks: totalClicks,\n        conversions: totalConversions,\n        ctr: totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0,\n        cvr: totalClicks > 0 ? (totalConversions / totalClicks) * 100 : 0,\n        revenue: totalRevenue,\n        uniqueUsers: uniqueUsers.size,\n        totalCampaigns: campaignKeys.filter(k => !k.includes(':20')).length,\n        totalPublishers: publisherKeys.length\n      };\n    } catch (error) {\n      console.error('Failed to get global metrics:', error);\n      return {\n        impressions: 0,\n        clicks: 0,\n        conversions: 0,\n        ctr: 0,\n        cvr: 0,\n        revenue: 0,\n        uniqueUsers: 0,\n        totalCampaigns: 0,\n        totalPublishers: 0\n      };\n    }\n  }\n\n  /**\n   * Get user interaction frequency for a campaign (for frequency capping)\n   */\n  async getUserInteractionFrequency(userDid: string, campaignId: string): Promise<{\n    impressions: number;\n    clicks: number;\n    conversions: number;\n  }> {\n    if (!this.isConnected) {\n      return { impressions: 0, clicks: 0, conversions: 0 };\n    }\n\n    try {\n      const userInteractionKey = `user:${userDid}:campaign:${campaignId}`;\n      const interactions = await this.redis.hgetall(userInteractionKey);\n\n      return {\n        impressions: parseInt(interactions.impression || '0'),\n        clicks: parseInt(interactions.click || '0'),\n        conversions: parseInt(interactions.conversion || '0')\n      };\n    } catch (error) {\n      console.error('Failed to get user interaction frequency:', error);\n      return { impressions: 0, clicks: 0, conversions: 0 };\n    }\n  }\n\n  /**\n   * Get real-time event stream\n   */\n  async getRealtimeEvents(eventType: 'impression' | 'click' | 'conversion', limit: number = 100): Promise<any[]> {\n    if (!this.isConnected) {\n      return [];\n    }\n\n    try {\n      const streamKey = `stream:events:${eventType}`;\n      const events = await this.redis.xrevrange(streamKey, '+', '-', 'COUNT', limit);\n      \n      return events.map(([id, fields]) => {\n        const event: any = { id };\n        for (let i = 0; i < fields.length; i += 2) {\n          const key = fields[i];\n          const value = fields[i + 1];\n          event[key] = key === 'metadata' ? JSON.parse(value) : value;\n        }\n        return event;\n      });\n    } catch (error) {\n      console.error('Failed to get realtime events:', error);\n      return [];\n    }\n  }\n\n  /**\n   * Health check\n   */\n  isHealthy(): boolean {\n    return this.isConnected;\n  }\n\n  /**\n   * Close connections and cleanup\n   */\n  async close(): Promise<void> {\n    if (this.flushInterval) {\n      clearInterval(this.flushInterval);\n    }\n    \n    // Flush any remaining events\n    await this.flushEventBuffer();\n    \n    await this.redis.quit();\n    this.isConnected = false;\n  }\n\n  // ==================== MOCK DATA FOR OFFLINE MODE ====================\n\n  private getMockCampaignMetrics(campaignId: string): CampaignMetrics {\n    const impressions = Math.floor(Math.random() * 10000) + 1000;\n    const clicks = Math.floor(impressions * (Math.random() * 0.1 + 0.02));\n    const conversions = Math.floor(clicks * (Math.random() * 0.1 + 0.02));\n    const spent = impressions * 0.001 + clicks * 0.01 + conversions * 0.1;\n\n    return {\n      campaignId,\n      impressions,\n      clicks,\n      conversions,\n      ctr: (clicks / impressions) * 100,\n      cvr: (conversions / clicks) * 100,\n      revenue: spent,\n      uniqueUsers: Math.floor(impressions * 0.7),\n      spent,\n      remainingBudget: Math.max(0, 1000 - spent),\n      averageCpm: (spent / impressions) * 1000,\n      averageCpc: spent / clicks,\n      averageCpa: spent / conversions\n    };\n  }\n\n  private getMockPublisherMetrics(publisherId: string): PublisherMetrics {\n    const impressions = Math.floor(Math.random() * 5000) + 500;\n    const clicks = Math.floor(impressions * (Math.random() * 0.08 + 0.02));\n    const conversions = Math.floor(clicks * (Math.random() * 0.08 + 0.02));\n    const earnings = impressions * 0.0005 + clicks * 0.005 + conversions * 0.05;\n\n    return {\n      publisherId,\n      impressions,\n      clicks,\n      conversions,\n      ctr: (clicks / impressions) * 100,\n      cvr: (conversions / clicks) * 100,\n      revenue: earnings,\n      uniqueUsers: Math.floor(impressions * 0.6),\n      totalEarnings: earnings,\n      averageRpm: (earnings / impressions) * 1000,\n      fillRate: Math.random() * 20 + 80 // 80-100%\n    };\n  }\n}\n\n// Export singleton instance\nexport const eventTracker = new EventTracker();\nexport default EventTracker;
+    const campaignDailyKey = `metrics:campaign:${event.campaignId}:${dateKey}`;
+    pipeline.hincrby(campaignDailyKey, event.type, 1);
+    pipeline.expire(campaignDailyKey, 86400 * 90); // Keep daily metrics for 90 days
+
+    // Update publisher metrics
+    const publisherKey = `metrics:publisher:${event.publisherDid}`;
+    pipeline.hincrby(publisherKey, event.type, 1);
+    pipeline.hincrby(publisherKey, 'total_events', 1);
+    pipeline.hset(publisherKey, 'last_updated', event.timestamp!);
+
+    // Update user interaction tracking (for frequency capping)
+    const userInteractionKey = `user:${event.userDid}:campaign:${event.campaignId}`;
+    pipeline.hincrby(userInteractionKey, event.type, 1);
+    pipeline.expire(userInteractionKey, 86400 * 7); // Keep user interactions for 7 days
+
+    // Add to real-time event stream
+    const streamKey = `stream:events:${event.type}`;
+    pipeline.xadd(streamKey, 'MAXLEN', '~', '10000', '*',
+      'campaignId', event.campaignId,
+      'publisherDid', event.publisherDid,
+      'timestamp', event.timestamp!,
+      'metadata', JSON.stringify(event.metadata)
+    );
+
+    // Execute all Redis operations
+    await pipeline.exec();
+
+    console.log(`✅ Event tracked: ${event.type} for campaign ${event.campaignId}`);
+  }
+
+  /**
+   * Flush buffered events to Redis
+   */
+  private async flushEventBuffer(): Promise<void> {
+    if (this.eventBuffer.length === 0 || !this.isConnected) {
+      return;
+    }
+
+    const eventsToFlush = [...this.eventBuffer];
+    this.eventBuffer = [];
+
+    try {
+      await Promise.all(eventsToFlush.map(event => this.processEventImmediate(event)));
+      console.log(`✅ Flushed ${eventsToFlush.length} buffered events`);
+    } catch (error) {
+      console.error('Failed to flush events, re-buffering:', error);
+      this.eventBuffer.unshift(...eventsToFlush);
+    }
+  }
+
+  /**
+   * Get campaign metrics
+   */
+  async getCampaignMetrics(campaignId: string): Promise<CampaignMetrics> {
+    if (!this.isConnected) {
+      return this.getMockCampaignMetrics(campaignId);
+    }
+
+    try {
+      const metricsKey = `metrics:campaign:${campaignId}`;
+      const metrics = await this.redis.hgetall(metricsKey);
+
+      const impressions = parseInt(metrics.impression || '0');
+      const clicks = parseInt(metrics.click || '0');
+      const conversions = parseInt(metrics.conversion || '0');
+      const spent = parseFloat(metrics.spent || '0');
+
+      return {
+        campaignId,
+        impressions,
+        clicks,
+        conversions,
+        ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+        cvr: clicks > 0 ? (conversions / clicks) * 100 : 0,
+        revenue: spent,
+        uniqueUsers: parseInt(metrics.unique_users || '0'),
+        spent,
+        remainingBudget: parseFloat(metrics.remaining_budget || '0'),
+        averageCpm: impressions > 0 ? (spent / impressions) * 1000 : 0,
+        averageCpc: clicks > 0 ? spent / clicks : 0,
+        averageCpa: conversions > 0 ? spent / conversions : 0
+      };
+    } catch (error) {
+      console.error('Failed to get campaign metrics:', error);
+      return this.getMockCampaignMetrics(campaignId);
+    }
+  }
+
+  /**
+   * Get publisher metrics
+   */
+  async getPublisherMetrics(publisherId: string): Promise<PublisherMetrics> {
+    if (!this.isConnected) {
+      return this.getMockPublisherMetrics(publisherId);
+    }
+
+    try {
+      const metricsKey = `metrics:publisher:${publisherId}`;
+      const metrics = await this.redis.hgetall(metricsKey);
+
+      const impressions = parseInt(metrics.impression || '0');
+      const clicks = parseInt(metrics.click || '0');
+      const conversions = parseInt(metrics.conversion || '0');
+      const earnings = parseFloat(metrics.earnings || '0');
+
+      return {
+        publisherId,
+        impressions,
+        clicks,
+        conversions,
+        ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+        cvr: clicks > 0 ? (conversions / clicks) * 100 : 0,
+        revenue: earnings,
+        uniqueUsers: parseInt(metrics.unique_users || '0'),
+        totalEarnings: earnings,
+        averageRpm: impressions > 0 ? (earnings / impressions) * 1000 : 0,
+        fillRate: parseFloat(metrics.fill_rate || '0')
+      };
+    } catch (error) {
+      console.error('Failed to get publisher metrics:', error);
+      return this.getMockPublisherMetrics(publisherId);
+    }
+  }
+
+  /**
+   * Get global platform metrics
+   */
+  async getGlobalMetrics(): Promise<EventMetrics & { totalCampaigns: number; totalPublishers: number }> {
+    if (!this.isConnected) {
+      return {
+        impressions: 12500,
+        clicks: 875,
+        conversions: 43,
+        ctr: 7.0,
+        cvr: 4.9,
+        revenue: 1250.75,
+        uniqueUsers: 8900,
+        totalCampaigns: 25,
+        totalPublishers: 12
+      };
+    }
+
+    try {
+      // Get all campaign keys
+      const campaignKeys = await this.redis.keys('metrics:campaign:*');
+      const publisherKeys = await this.redis.keys('metrics:publisher:*');
+
+      let totalImpressions = 0;
+      let totalClicks = 0;
+      let totalConversions = 0;
+      let totalRevenue = 0;
+      const uniqueUsers = new Set<string>();
+
+      // Aggregate campaign metrics
+      for (const key of campaignKeys) {
+        if (key.includes(':20')) continue; // Skip daily metrics
+        const metrics = await this.redis.hgetall(key);
+        totalImpressions += parseInt(metrics.impression || '0');
+        totalClicks += parseInt(metrics.click || '0');
+        totalConversions += parseInt(metrics.conversion || '0');
+        totalRevenue += parseFloat(metrics.spent || '0');
+      }
+
+      return {
+        impressions: totalImpressions,
+        clicks: totalClicks,
+        conversions: totalConversions,
+        ctr: totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0,
+        cvr: totalClicks > 0 ? (totalConversions / totalClicks) * 100 : 0,
+        revenue: totalRevenue,
+        uniqueUsers: uniqueUsers.size,
+        totalCampaigns: campaignKeys.filter(k => !k.includes(':20')).length,
+        totalPublishers: publisherKeys.length
+      };
+    } catch (error) {
+      console.error('Failed to get global metrics:', error);
+      return {
+        impressions: 0,
+        clicks: 0,
+        conversions: 0,
+        ctr: 0,
+        cvr: 0,
+        revenue: 0,
+        uniqueUsers: 0,
+        totalCampaigns: 0,
+        totalPublishers: 0
+      };
+    }
+  }
+
+  /**
+   * Get user interaction frequency for a campaign (for frequency capping)
+   */
+  async getUserInteractionFrequency(userDid: string, campaignId: string): Promise<{
+    impressions: number;
+    clicks: number;
+    conversions: number;
+  }> {
+    if (!this.isConnected) {
+      return { impressions: 0, clicks: 0, conversions: 0 };
+    }
+
+    try {
+      const userInteractionKey = `user:${userDid}:campaign:${campaignId}`;
+      const interactions = await this.redis.hgetall(userInteractionKey);
+
+      return {
+        impressions: parseInt(interactions.impression || '0'),
+        clicks: parseInt(interactions.click || '0'),
+        conversions: parseInt(interactions.conversion || '0')
+      };
+    } catch (error) {
+      console.error('Failed to get user interaction frequency:', error);
+      return { impressions: 0, clicks: 0, conversions: 0 };
+    }
+  }
+
+  /**
+   * Get real-time event stream
+   */
+  async getRealtimeEvents(eventType: 'impression' | 'click' | 'conversion', limit: number = 100): Promise<any[]> {
+    if (!this.isConnected) {
+      return [];
+    }
+
+    try {
+      const streamKey = `stream:events:${eventType}`;
+      const events = await this.redis.xrevrange(streamKey, '+', '-', 'COUNT', limit);
+
+      return events.map(([id, fields]) => {
+        const event: any = { id };
+        for (let i = 0; i < fields.length; i += 2) {
+          const key = fields[i];
+          const value = fields[i + 1];
+          event[key] = key === 'metadata' ? JSON.parse(value) : value;
+        }
+        return event;
+      });
+    } catch (error) {
+      console.error('Failed to get realtime events:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Health check
+   */
+  isHealthy(): boolean {
+    return this.isConnected;
+  }
+
+  /**
+   * Close connections and cleanup
+   */
+  async close(): Promise<void> {
+    if (this.flushInterval) {
+      clearInterval(this.flushInterval);
+    }
+
+    // Flush any remaining events
+    await this.flushEventBuffer();
+
+    await this.redis.quit();
+    this.isConnected = false;
+  }
+
+  // ==================== MOCK DATA FOR OFFLINE MODE ====================
+
+  private getMockCampaignMetrics(campaignId: string): CampaignMetrics {
+    const impressions = Math.floor(Math.random() * 10000) + 1000;
+    const clicks = Math.floor(impressions * (Math.random() * 0.1 + 0.02));
+    const conversions = Math.floor(clicks * (Math.random() * 0.1 + 0.02));
+    const spent = impressions * 0.001 + clicks * 0.01 + conversions * 0.1;
+
+    return {
+      campaignId,
+      impressions,
+      clicks,
+      conversions,
+      ctr: (clicks / impressions) * 100,
+      cvr: (conversions / clicks) * 100,
+      revenue: spent,
+      uniqueUsers: Math.floor(impressions * 0.7),
+      spent,
+      remainingBudget: Math.max(0, 1000 - spent),
+      averageCpm: (spent / impressions) * 1000,
+      averageCpc: spent / clicks,
+      averageCpa: spent / conversions
+    };
+  }
+
+  private getMockPublisherMetrics(publisherId: string): PublisherMetrics {
+    const impressions = Math.floor(Math.random() * 5000) + 500;
+    const clicks = Math.floor(impressions * (Math.random() * 0.08 + 0.02));
+    const conversions = Math.floor(clicks * (Math.random() * 0.08 + 0.02));
+    const earnings = impressions * 0.0005 + clicks * 0.005 + conversions * 0.05;
+
+    return {
+      publisherId,
+      impressions,
+      clicks,
+      conversions,
+      ctr: (clicks / impressions) * 100,
+      cvr: (conversions / clicks) * 100,
+      revenue: earnings,
+      uniqueUsers: Math.floor(impressions * 0.6),
+      totalEarnings: earnings,
+      averageRpm: (earnings / impressions) * 1000,
+      fillRate: Math.random() * 20 + 80 // 80-100%
+    };
+  }
+}
+
+// Export singleton instance
+export const eventTracker = new EventTracker();
+export default EventTracker;
