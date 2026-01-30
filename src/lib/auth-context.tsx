@@ -176,6 +176,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(true);
     
     try {
+      console.log('Attempting Supabase signUp for:', email);
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
@@ -188,58 +189,108 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
 
       if (error) {
+        console.error('Supabase signUp error:', error);
         throw new Error(error.message);
       }
 
       if (data.user) {
-        // Wait a moment for the trigger to create the profile
-        await new Promise(resolve => setTimeout(resolve, 500));
+        console.log('User created in auth.users:', data.user.id);
         
-        // Update the profile with the role
-        const { error: updateError } = await supabase
-          .from('profiles')
-          .update({ 
-            display_name: name, 
-            role: role 
-          })
-          .eq('id', data.user.id);
+        // Poll for profile creation (handled by trigger)
+        let userProfile = null;
+        let attempts = 0;
+        const maxAttempts = 10;
 
-        if (updateError) {
-          console.error('Error updating profile:', updateError);
-          throw new Error(`Database error saving profile: ${updateError.message}`);
-        }
-
-        // Create role-specific record
-        if (role === 'advertiser') {
-          const { error: advertiserError } = await supabase.from('advertisers').insert({
-            user_id: data.user.id,
-            company_name: name,
-          });
-          if (advertiserError) {
-            console.error('Error creating advertiser record:', advertiserError);
-            throw new Error(`Database error saving advertiser: ${advertiserError.message}`);
-          }
-        } else if (role === 'publisher') {
-          const { error: publisherError } = await supabase.from('publishers').insert({
-            user_id: data.user.id,
-            name: name,
-          });
-          if (publisherError) {
-            console.error('Error creating publisher record:', publisherError);
-            throw new Error(`Database error saving publisher: ${publisherError.message}`);
+        while (!userProfile && attempts < maxAttempts) {
+          attempts++;
+          console.log(`Polling for profile (attempt ${attempts})...`);
+          userProfile = await fetchProfile(data.user.id);
+          if (!userProfile) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
           }
         }
 
-        const userProfile = await fetchProfile(data.user.id);
+        if (!userProfile) {
+          console.warn('Profile not found after polling, attempting manual creation');
+          // Manual fallback if trigger fails or is slow
+          const { data: newProfile, error: insertError } = await supabase
+            .from('profiles')
+            .upsert({
+              id: data.user.id,
+              email: email,
+              display_name: name,
+              role: role,
+              did: `did:metaverse:${data.user.id}`
+            })
+            .select()
+            .single();
+
+          if (insertError) {
+            console.error('Manual profile creation failed:', insertError);
+          } else {
+            userProfile = newProfile;
+          }
+        } else {
+          // Update profile if it exists but might need fresh data
+          const { data: updatedProfile, error: updateError } = await supabase
+            .from('profiles')
+            .update({
+              display_name: name,
+              role: role
+            })
+            .eq('id', data.user.id)
+            .select()
+            .single();
+
+          if (!updateError) {
+            userProfile = updatedProfile;
+          }
+        }
+
+        // Create role-specific record if session is available (RLS requirement)
+        if (data.session || (await supabase.auth.getSession()).data.session) {
+          if (role === 'advertiser') {
+            const { error: advertiserError } = await supabase
+              .from('advertisers')
+              .upsert({
+                user_id: data.user.id,
+                company_name: name,
+              }, { onConflict: 'user_id' });
+
+            if (advertiserError) {
+              console.error('Error saving advertiser record:', advertiserError);
+            }
+          } else if (role === 'publisher') {
+            const { error: publisherError } = await supabase
+              .from('publishers')
+              .upsert({
+                user_id: data.user.id,
+                name: name,
+              }, { onConflict: 'user_id' });
+
+            if (publisherError) {
+              console.error('Error saving publisher record:', publisherError);
+            }
+          }
+        } else {
+          console.warn('No active session after registration, skipping role-specific record creation');
+        }
+
         if (userProfile) {
           setProfile(userProfile);
           setUser(profileToUser(userProfile));
         }
         
-        console.log('✅ Registration successful:', email);
+        console.log('✅ Registration process completed for:', email);
       }
     } catch (error: any) {
-      console.error('❌ Registration error:', error);
+      console.error('❌ Registration error detail:', {
+        message: error.message,
+        error,
+        stack: error.stack,
+        email,
+        role
+      });
       throw error;
     } finally {
       setIsLoading(false);
