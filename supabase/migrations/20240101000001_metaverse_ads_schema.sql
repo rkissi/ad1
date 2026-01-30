@@ -4,12 +4,59 @@
 -- Enable required extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Create enum types for better type safety
-CREATE TYPE user_role AS ENUM ('user', 'advertiser', 'publisher', 'admin');
-CREATE TYPE campaign_status AS ENUM ('draft', 'pending', 'active', 'paused', 'completed', 'rejected');
-CREATE TYPE event_type AS ENUM ('impression', 'click', 'conversion', 'view');
-CREATE TYPE transaction_status AS ENUM ('pending', 'processing', 'completed', 'failed', 'refunded');
-CREATE TYPE verification_status AS ENUM ('pending', 'verified', 'rejected');
+-- Create enum types for better type safety (idempotent)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
+    CREATE TYPE user_role AS ENUM ('user', 'advertiser', 'publisher', 'admin');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'campaign_status') THEN
+    CREATE TYPE campaign_status AS ENUM ('draft', 'pending', 'active', 'paused', 'completed', 'rejected');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'event_type') THEN
+    CREATE TYPE event_type AS ENUM ('impression', 'click', 'conversion', 'view');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'transaction_status') THEN
+    CREATE TYPE transaction_status AS ENUM ('pending', 'processing', 'completed', 'failed', 'refunded');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'verification_status') THEN
+    CREATE TYPE verification_status AS ENUM ('pending', 'verified', 'rejected');
+  END IF;
+END
+$$;
+
+-- (Optional) ensure enum contains labels - requires Postgres 14+ for IF NOT EXISTS on ADD VALUE
+-- Remove these ALTER TYPE lines if your server is older than 14
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'user';
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'advertiser';
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'publisher';
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'admin';
+
+ALTER TYPE campaign_status ADD VALUE IF NOT EXISTS 'draft';
+ALTER TYPE campaign_status ADD VALUE IF NOT EXISTS 'pending';
+ALTER TYPE campaign_status ADD VALUE IF NOT EXISTS 'active';
+ALTER TYPE campaign_status ADD VALUE IF NOT EXISTS 'paused';
+ALTER TYPE campaign_status ADD VALUE IF NOT EXISTS 'completed';
+ALTER TYPE campaign_status ADD VALUE IF NOT EXISTS 'rejected';
+
+ALTER TYPE event_type ADD VALUE IF NOT EXISTS 'impression';
+ALTER TYPE event_type ADD VALUE IF NOT EXISTS 'click';
+ALTER TYPE event_type ADD VALUE IF NOT EXISTS 'conversion';
+ALTER TYPE event_type ADD VALUE IF NOT EXISTS 'view';
+
+ALTER TYPE transaction_status ADD VALUE IF NOT EXISTS 'pending';
+ALTER TYPE transaction_status ADD VALUE IF NOT EXISTS 'processing';
+ALTER TYPE transaction_status ADD VALUE IF NOT EXISTS 'completed';
+ALTER TYPE transaction_status ADD VALUE IF NOT EXISTS 'failed';
+ALTER TYPE transaction_status ADD VALUE IF NOT EXISTS 'refunded';
+
+ALTER TYPE verification_status ADD VALUE IF NOT EXISTS 'pending';
+ALTER TYPE verification_status ADD VALUE IF NOT EXISTS 'verified';
+ALTER TYPE verification_status ADD VALUE IF NOT EXISTS 'rejected';
 
 -- Profiles table (extends Supabase auth.users)
 CREATE TABLE IF NOT EXISTS public.profiles (
@@ -208,91 +255,286 @@ ALTER TABLE public.user_rewards ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ad_creatives ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.platform_settings ENABLE ROW LEVEL SECURITY;
 
--- RLS Policies for profiles
-CREATE POLICY "Users can view their own profile" ON public.profiles
-  FOR SELECT USING (auth.uid() = id);
+-- Create RLS policies idempotently using DO blocks (CREATE POLICY has no IF NOT EXISTS)
+-- Profiles policies
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'users_can_view_their_own_profile' AND n.nspname = 'public' AND c.relname = 'profiles'
+  ) THEN
+    CREATE POLICY users_can_view_their_own_profile ON public.profiles
+      FOR SELECT USING (auth.uid() = id);
+  END IF;
 
-CREATE POLICY "Users can update their own profile" ON public.profiles
-  FOR UPDATE USING (auth.uid() = id);
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'users_can_update_their_own_profile' AND n.nspname = 'public' AND c.relname = 'profiles'
+  ) THEN
+    CREATE POLICY users_can_update_their_own_profile ON public.profiles
+      FOR UPDATE USING (auth.uid() = id);
+  END IF;
 
-CREATE POLICY "Admins can view all profiles" ON public.profiles
-  FOR SELECT USING (
-    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-  );
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'admins_can_view_all_profiles' AND n.nspname = 'public' AND c.relname = 'profiles'
+  ) THEN
+    CREATE POLICY admins_can_view_all_profiles ON public.profiles
+      FOR SELECT USING (
+        EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
+      );
+  END IF;
 
-CREATE POLICY "Public profiles are viewable" ON public.profiles
-  FOR SELECT USING (true);
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'public_profiles_are_viewable' AND n.nspname = 'public' AND c.relname = 'profiles'
+  ) THEN
+    CREATE POLICY public_profiles_are_viewable ON public.profiles
+      FOR SELECT USING (true);
+  END IF;
+END
+$$;
 
--- RLS Policies for campaigns
-CREATE POLICY "Anyone can view active campaigns" ON public.campaigns
-  FOR SELECT USING (status = 'active');
+-- Campaigns policies
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'anyone_can_view_active_campaigns' AND n.nspname = 'public' AND c.relname = 'campaigns'
+  ) THEN
+    CREATE POLICY anyone_can_view_active_campaigns ON public.campaigns
+      FOR SELECT USING (status = 'active');
+  END IF;
 
-CREATE POLICY "Advertisers can manage their campaigns" ON public.campaigns
-  FOR ALL USING (advertiser_id = auth.uid());
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'advertisers_manage_their_campaigns' AND n.nspname = 'public' AND c.relname = 'campaigns'
+  ) THEN
+    CREATE POLICY advertisers_manage_their_campaigns ON public.campaigns
+      FOR ALL USING (advertiser_id = auth.uid());
+  END IF;
 
-CREATE POLICY "Admins can manage all campaigns" ON public.campaigns
-  FOR ALL USING (
-    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-  );
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'admins_manage_all_campaigns' AND n.nspname = 'public' AND c.relname = 'campaigns'
+  ) THEN
+    CREATE POLICY admins_manage_all_campaigns ON public.campaigns
+      FOR ALL USING (
+        EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
+      );
+  END IF;
+END
+$$;
 
--- RLS Policies for publishers
-CREATE POLICY "Publishers can manage their own data" ON public.publishers
-  FOR ALL USING (user_id = auth.uid());
+-- Publishers policies
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'publishers_manage_their_own_data' AND n.nspname = 'public' AND c.relname = 'publishers'
+  ) THEN
+    CREATE POLICY publishers_manage_their_own_data ON public.publishers
+      FOR ALL USING (user_id = auth.uid());
+  END IF;
 
-CREATE POLICY "Anyone can view active publishers" ON public.publishers
-  FOR SELECT USING (status = 'active');
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'anyone_view_active_publishers' AND n.nspname = 'public' AND c.relname = 'publishers'
+  ) THEN
+    CREATE POLICY anyone_view_active_publishers ON public.publishers
+      FOR SELECT USING (status = 'active');
+  END IF;
+END
+$$;
 
--- RLS Policies for advertisers
-CREATE POLICY "Advertisers can manage their own data" ON public.advertisers
-  FOR ALL USING (user_id = auth.uid());
+-- Advertisers policies
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'advertisers_manage_their_own_data' AND n.nspname = 'public' AND c.relname = 'advertisers'
+  ) THEN
+    CREATE POLICY advertisers_manage_their_own_data ON public.advertisers
+      FOR ALL USING (user_id = auth.uid());
+  END IF;
 
-CREATE POLICY "Admins can view all advertisers" ON public.advertisers
-  FOR SELECT USING (
-    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-  );
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'admins_view_all_advertisers' AND n.nspname = 'public' AND c.relname = 'advertisers'
+  ) THEN
+    CREATE POLICY admins_view_all_advertisers ON public.advertisers
+      FOR SELECT USING (
+        EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
+      );
+  END IF;
+END
+$$;
 
--- RLS Policies for consents
-CREATE POLICY "Users can manage their own consents" ON public.consents
-  FOR ALL USING (user_id = auth.uid());
+-- Consents policies
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'users_manage_their_own_consents' AND n.nspname = 'public' AND c.relname = 'consents'
+  ) THEN
+    CREATE POLICY users_manage_their_own_consents ON public.consents
+      FOR ALL USING (user_id = auth.uid());
+  END IF;
+END
+$$;
 
--- RLS Policies for events
-CREATE POLICY "Users can view their own events" ON public.events
-  FOR SELECT USING (user_id = auth.uid());
+-- Events policies
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'users_view_their_own_events' AND n.nspname = 'public' AND c.relname = 'events'
+  ) THEN
+    CREATE POLICY users_view_their_own_events ON public.events
+      FOR SELECT USING (user_id = auth.uid());
+  END IF;
 
-CREATE POLICY "Publishers can view their events" ON public.events
-  FOR SELECT USING (publisher_id IN (SELECT id FROM public.publishers WHERE user_id = auth.uid()));
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'publishers_view_their_events' AND n.nspname = 'public' AND c.relname = 'events'
+  ) THEN
+    CREATE POLICY publishers_view_their_events ON public.events
+      FOR SELECT USING (publisher_id IN (SELECT id FROM public.publishers WHERE user_id = auth.uid()));
+  END IF;
 
-CREATE POLICY "Advertisers can view campaign events" ON public.events
-  FOR SELECT USING (campaign_id IN (SELECT id FROM public.campaigns WHERE advertiser_id = auth.uid()));
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'advertisers_view_campaign_events' AND n.nspname = 'public' AND c.relname = 'events'
+  ) THEN
+    CREATE POLICY advertisers_view_campaign_events ON public.events
+      FOR SELECT USING (campaign_id IN (SELECT id FROM public.campaigns WHERE advertiser_id = auth.uid()));
+  END IF;
 
-CREATE POLICY "Service role can insert events" ON public.events
-  FOR INSERT WITH CHECK (true);
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'service_role_insert_events' AND n.nspname = 'public' AND c.relname = 'events'
+  ) THEN
+    CREATE POLICY service_role_insert_events ON public.events
+      FOR INSERT WITH CHECK (true);
+  END IF;
+END
+$$;
 
--- RLS Policies for transactions
-CREATE POLICY "Users can view their transactions" ON public.transactions
-  FOR SELECT USING (from_user_id = auth.uid() OR to_user_id = auth.uid());
+-- Transactions policies
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'users_view_their_transactions' AND n.nspname = 'public' AND c.relname = 'transactions'
+  ) THEN
+    CREATE POLICY users_view_their_transactions ON public.transactions
+      FOR SELECT USING (from_user_id = auth.uid() OR to_user_id = auth.uid());
+  END IF;
+END
+$$;
 
--- RLS Policies for user_rewards
-CREATE POLICY "Users can view their rewards" ON public.user_rewards
-  FOR SELECT USING (user_id = auth.uid());
+-- User rewards policies
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'users_view_their_rewards' AND n.nspname = 'public' AND c.relname = 'user_rewards'
+  ) THEN
+    CREATE POLICY users_view_their_rewards ON public.user_rewards
+      FOR SELECT USING (user_id = auth.uid());
+  END IF;
+END
+$$;
 
--- RLS Policies for ad_creatives
-CREATE POLICY "Anyone can view active creatives" ON public.ad_creatives
-  FOR SELECT USING (is_active = true);
+-- Ad creatives policies
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'anyone_view_active_creatives' AND n.nspname = 'public' AND c.relname = 'ad_creatives'
+  ) THEN
+    CREATE POLICY anyone_view_active_creatives ON public.ad_creatives
+      FOR SELECT USING (is_active = true);
+  END IF;
 
-CREATE POLICY "Advertisers can manage their creatives" ON public.ad_creatives
-  FOR ALL USING (
-    campaign_id IN (SELECT id FROM public.campaigns WHERE advertiser_id = auth.uid())
-  );
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'advertisers_manage_their_creatives' AND n.nspname = 'public' AND c.relname = 'ad_creatives'
+  ) THEN
+    CREATE POLICY advertisers_manage_their_creatives ON public.ad_creatives
+      FOR ALL USING (
+        campaign_id IN (SELECT id FROM public.campaigns WHERE advertiser_id = auth.uid())
+      );
+  END IF;
+END
+$$;
 
--- RLS Policies for platform_settings
-CREATE POLICY "Admins can manage settings" ON public.platform_settings
-  FOR ALL USING (
-    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-  );
+-- Platform settings policies
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'admins_manage_settings' AND n.nspname = 'public' AND c.relname = 'platform_settings'
+  ) THEN
+    CREATE POLICY admins_manage_settings ON public.platform_settings
+      FOR ALL USING (
+        EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
+      );
+  END IF;
 
-CREATE POLICY "Anyone can view settings" ON public.platform_settings
-  FOR SELECT USING (true);
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    JOIN pg_class c ON p.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE p.polname = 'anyone_view_settings' AND n.nspname = 'public' AND c.relname = 'platform_settings'
+  ) THEN
+    CREATE POLICY anyone_view_settings ON public.platform_settings
+      FOR SELECT USING (true);
+  END IF;
+END
+$$;
 
 -- Function to handle new user registration
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -325,19 +567,24 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Apply updated_at triggers
+-- Apply updated_at triggers (drop first to be idempotent)
+DROP TRIGGER IF EXISTS update_profiles_updated_at ON public.profiles;
 CREATE TRIGGER update_profiles_updated_at BEFORE UPDATE ON public.profiles
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_campaigns_updated_at ON public.campaigns;
 CREATE TRIGGER update_campaigns_updated_at BEFORE UPDATE ON public.campaigns
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_publishers_updated_at ON public.publishers;
 CREATE TRIGGER update_publishers_updated_at BEFORE UPDATE ON public.publishers
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_advertisers_updated_at ON public.advertisers;
 CREATE TRIGGER update_advertisers_updated_at BEFORE UPDATE ON public.advertisers
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_transactions_updated_at ON public.transactions;
 CREATE TRIGGER update_transactions_updated_at BEFORE UPDATE ON public.transactions
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
@@ -362,6 +609,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+DROP TRIGGER IF EXISTS update_campaign_metrics_trigger ON public.events;
 CREATE TRIGGER update_campaign_metrics_trigger
   AFTER INSERT ON public.events
   FOR EACH ROW EXECUTE FUNCTION public.update_campaign_metrics();
@@ -379,6 +627,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+DROP TRIGGER IF EXISTS update_publisher_metrics_trigger ON public.events;
 CREATE TRIGGER update_publisher_metrics_trigger
   AFTER INSERT ON public.events
   FOR EACH ROW EXECUTE FUNCTION public.update_publisher_metrics();
