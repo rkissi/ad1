@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS public.campaigns (
 -- Publishers table
 CREATE TABLE IF NOT EXISTS public.publishers (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+  user_id UUID UNIQUE REFERENCES public.profiles(id) ON DELETE CASCADE,
   name VARCHAR(255) NOT NULL,
   domain VARCHAR(255),
   description TEXT,
@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS public.publishers (
 -- Advertisers table
 CREATE TABLE IF NOT EXISTS public.advertisers (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+  user_id UUID UNIQUE REFERENCES public.profiles(id) ON DELETE CASCADE,
   company_name VARCHAR(255),
   industry VARCHAR(100),
   website VARCHAR(500),
@@ -547,7 +547,11 @@ BEGIN
     COALESCE(NEW.raw_user_meta_data->>'display_name', split_part(NEW.email, '@', 1)),
     'did:metaverse:' || NEW.id::text,
     COALESCE((NEW.raw_user_meta_data->>'role')::user_role, 'user')
-  );
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    display_name = EXCLUDED.display_name,
+    role = EXCLUDED.role,
+    updated_at = NOW();
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;

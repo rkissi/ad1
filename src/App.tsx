@@ -59,11 +59,14 @@ function ProtectedRoute({
   return <>{children}</>;
 }
 
+function TempoRoutes() {
+  return useRoutes(routes);
+}
+
 function AppContent() {
   const { user, isAuthenticated, isLoading, login, register, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const tempoRoutes = useRoutes(routes);
 
   // Redirect authenticated users away from login page
   useEffect(() => {
@@ -112,7 +115,7 @@ function AppContent() {
     }>
       <>
         <Routes>
-          {/* Public Routes */}
+          {/* Explicit Public Routes */}
           <Route 
             path="/login" 
             element={
@@ -122,17 +125,21 @@ function AppContent() {
                 <LandingPage 
                   onLogin={async (credentials) => {
                     try {
+                      console.log('Attempting login for:', credentials.email);
                       await login(credentials.email, credentials.password);
-                      // Navigation handled by useEffect above
+                      console.log('Login call completed for:', credentials.email);
                     } catch (error: any) {
+                      console.error('App.tsx login error:', error);
                       alert(error.message || 'Login failed. Please try again.');
                     }
                   }}
                   onRegister={async (userData) => {
                     try {
+                      console.log('Attempting registration for:', userData.email);
                       await register(userData.email, userData.password, userData.name, userData.role as any);
-                      // Navigation handled by useEffect above
+                      console.log('Registration call completed for:', userData.email);
                     } catch (error: any) {
+                      console.error('App.tsx registration error:', error);
                       alert(error.message || 'Registration failed. Please try again.');
                     }
                   }}
@@ -215,7 +222,11 @@ function AppContent() {
             } 
           />
         </Routes>
-        {import.meta.env.VITE_TEMPO === "true" && tempoRoutes}
+        {import.meta.env.VITE_TEMPO === "true" && (
+          <Suspense fallback={null}>
+            <TempoRoutes />
+          </Suspense>
+        )}
       </>
     </Suspense>
   );
