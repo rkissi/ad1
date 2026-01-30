@@ -9,6 +9,9 @@ import "./MetaverseAdToken.sol";
  */
 contract MetaverseAdMarketplace {
     MetaverseAdToken public immutable token;
+    address public owner;
+    bool public paused;
+    address public oracleAddress;
     
     struct Campaign {
         string campaignId;
@@ -72,6 +75,31 @@ contract MetaverseAdMarketplace {
     constructor(address _tokenAddress, address _protocolTreasury) {
         token = MetaverseAdToken(_tokenAddress);
         protocolTreasury = _protocolTreasury;
+        owner = msg.sender;
+        oracleAddress = msg.sender; // Default to owner for demo
+    }
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not owner");
+        _;
+    }
+
+    modifier onlyOracle() {
+        require(msg.sender == oracleAddress, "Not authorized oracle");
+        _;
+    }
+
+    modifier whenNotPaused() {
+        require(!paused, "Contract is paused");
+        _;
+    }
+
+    function setPaused(bool _paused) external onlyOwner {
+        paused = _paused;
+    }
+
+    function setOracleAddress(address _oracle) external onlyOwner {
+        oracleAddress = _oracle;
     }
     
     /**
@@ -80,7 +108,7 @@ contract MetaverseAdMarketplace {
     function createCampaign(
         string memory campaignId,
         uint256 budget
-    ) external {
+    ) external whenNotPaused {
         require(campaigns[campaignId].advertiser == address(0), "Campaign already exists");
         require(budget > 0, "Budget must be greater than 0");
         
@@ -104,7 +132,7 @@ contract MetaverseAdMarketplace {
     function depositCampaignFunds(
         string memory campaignId,
         uint256 amount
-    ) external campaignExists(campaignId) onlyAdvertiser(campaignId) {
+    ) external whenNotPaused campaignExists(campaignId) onlyAdvertiser(campaignId) {
         require(amount > 0, "Amount must be greater than 0");
         
         Campaign storage campaign = campaigns[campaignId];
@@ -126,7 +154,7 @@ contract MetaverseAdMarketplace {
         string memory campaignId,
         address[] memory recipients,
         uint256[] memory amounts
-    ) external campaignExists(campaignId) onlyAdvertiser(campaignId) {
+    ) external whenNotPaused campaignExists(campaignId) onlyAdvertiser(campaignId) {
         require(recipients.length == amounts.length, "Arrays length mismatch");
         require(recipients.length > 0, "No recipients specified");
         
@@ -161,9 +189,7 @@ contract MetaverseAdMarketplace {
         address userAddress,
         address publisherAddress,
         uint256 eventValue
-    ) external campaignExists(campaignId) campaignActive(campaignId) {
-        // In production, this would be called by an oracle or authorized service
-        // For now, allowing anyone to call for demo purposes
+    ) external whenNotPaused campaignExists(campaignId) campaignActive(campaignId) onlyOracle {
         
         Campaign storage campaign = campaigns[campaignId];
         require(eventValue <= campaign.lockedAmount, "Insufficient funds for payout");

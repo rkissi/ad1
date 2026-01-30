@@ -503,6 +503,75 @@ describe('MetaverseAdMarketplace - Comprehensive Tests', function () {
   });
 });
 
+describe('MetaverseAdMarketplace - Hardened Security Tests', function () {
+  let marketplace: Contract;
+  let token: Contract;
+  let owner: Signer;
+  let advertiser: Signer;
+  let user1: Signer;
+  let oracle: Signer;
+  let attacker: Signer;
+
+  const INITIAL_SUPPLY = ethers.parseEther('1000000');
+  const CAMPAIGN_BUDGET = ethers.parseEther('1000');
+
+  beforeEach(async function () {
+    [owner, advertiser, user1, oracle, attacker] = await ethers.getSigners();
+    const MetaverseAdToken = await ethers.getContractFactory('MetaverseAdToken');
+    token = await MetaverseAdToken.deploy(INITIAL_SUPPLY);
+    const MetaverseAdMarketplace = await ethers.getContractFactory('MetaverseAdMarketplace');
+    marketplace = await MetaverseAdMarketplace.deploy(await token.getAddress(), await owner.getAddress());
+    await token.transfer(await advertiser.getAddress(), ethers.parseEther('10000'));
+  });
+
+  it('Should enforce emergency pause', async function () {
+    await marketplace.connect(advertiser).createCampaign('pause-test', CAMPAIGN_BUDGET);
+    await marketplace.setPaused(true);
+
+    await expect(
+      marketplace.connect(advertiser).depositCampaignFunds('pause-test', CAMPAIGN_BUDGET)
+    ).to.be.revertedWith('Contract is paused');
+
+    await marketplace.setPaused(false);
+    await token.connect(advertiser).approve(await marketplace.getAddress(), CAMPAIGN_BUDGET);
+    await expect(
+      marketplace.connect(advertiser).depositCampaignFunds('pause-test', CAMPAIGN_BUDGET)
+    ).to.not.be.reverted;
+  });
+
+  it('Should restrict automated payouts to authorized oracle', async function () {
+    await marketplace.connect(advertiser).createCampaign('oracle-test', CAMPAIGN_BUDGET);
+    await token.connect(advertiser).approve(await marketplace.getAddress(), CAMPAIGN_BUDGET);
+    await marketplace.connect(advertiser).depositCampaignFunds('oracle-test', CAMPAIGN_BUDGET);
+
+    await marketplace.setOracleAddress(await oracle.getAddress());
+
+    await expect(
+      marketplace.connect(attacker).executeAutomatedPayout('oracle-test', await user1.getAddress(), await attacker.getAddress(), ethers.parseEther('10'))
+    ).to.be.revertedWith('Not authorized oracle');
+
+    await expect(
+      marketplace.connect(oracle).executeAutomatedPayout('oracle-test', await user1.getAddress(), await attacker.getAddress(), ethers.parseEther('10'))
+    ).to.not.be.reverted;
+  });
+
+  it('Should prevent double payouts (idempotency simulation)', async function () {
+    // Note: In Solidity, idempotency is often handled by external IDs or state checks.
+    // Our contract relies on lockedAmount decreasing.
+    await marketplace.connect(advertiser).createCampaign('double-payout-test', CAMPAIGN_BUDGET);
+    await token.connect(advertiser).approve(await marketplace.getAddress(), CAMPAIGN_BUDGET);
+    await marketplace.connect(advertiser).depositCampaignFunds('double-payout-test', CAMPAIGN_BUDGET);
+
+    const amount = ethers.parseEther('600');
+    await marketplace.executeAutomatedPayout('double-payout-test', await user1.getAddress(), await owner.getAddress(), amount);
+
+    // Second attempt with same amount should fail if it exceeds remaining balance
+    await expect(
+      marketplace.executeAutomatedPayout('double-payout-test', await user1.getAddress(), await owner.getAddress(), amount)
+    ).to.be.revertedWith('Insufficient funds for payout');
+  });
+});
+
 describe('MetaverseAdToken - Edge Cases', function () {
   let token: Contract;
   let owner: Signer;

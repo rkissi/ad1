@@ -1,6 +1,7 @@
 // Transaction State Management for Production Blockchain Integration
 // Handles transaction persistence, retry logic, and state recovery
 
+import { ethers } from 'ethers';
 import DatabaseService from './database';
 import SmartContractService from './smart-contracts';
 import { eventTracker } from './event-tracker';
@@ -165,7 +166,33 @@ export class TransactionManager {
 
   // ==================== PAYOUT TRANSACTIONS ====================
 
+  async reconcileCampaign(campaignId: string): Promise<{ offChainSpent: number, onChainSpent: number, reconciled: boolean }> {
+    const campaign = await this.db.getCampaign(campaignId);
+    if (!campaign) throw new Error('Campaign not found');
+
+    const details = await this.contractService.getCampaignDetails(campaignId);
+    const onChainSpent = parseFloat(ethers.formatEther(details.spentAmount));
+    const offChainSpent = campaign.metrics.spent || 0;
+
+    return {
+      offChainSpent,
+      onChainSpent,
+      reconciled: Math.abs(offChainSpent - onChainSpent) < 0.000001
+    };
+  }
+
   async executeBatchPayouts(payoutData: PayoutTransaction): Promise<TransactionRecord> {
+    const campaign = await this.db.getCampaign(payoutData.campaignId);
+    if (!campaign) throw new Error('Campaign not found');
+
+    const details = await this.contractService.getCampaignDetails(payoutData.campaignId);
+    const lockedAmount = parseFloat(ethers.formatEther(details.lockedAmount));
+    const totalPayout = parseFloat(payoutData.totalAmount);
+
+    if (totalPayout > lockedAmount) {
+      throw new Error(`Insufficient funds: payout ${totalPayout} exceeds locked ${lockedAmount}`);
+    }
+
     const transactionId = `payout_${payoutData.campaignId}_${Date.now()}`;
     
     const transaction: TransactionRecord = {

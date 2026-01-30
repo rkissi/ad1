@@ -1,7 +1,7 @@
-import { HardhatUserConfig } from "hardhat/config";
-import "@nomicfoundation/hardhat-toolbox";
+require("@nomicfoundation/hardhat-toolbox");
 
-const config: HardhatUserConfig = {
+/** @type import('hardhat/config').HardhatUserConfig */
+module.exports = {
   solidity: {
     version: "0.8.19",
     settings: {
@@ -32,7 +32,7 @@ const config: HardhatUserConfig = {
   },
   paths: {
     sources: "./src/contracts",
-    tests: "./src/tests/contracts",
+    tests: "./src/tests",
     cache: "./cache",
     artifacts: "./artifacts"
   },
@@ -41,5 +41,3 @@ const config: HardhatUserConfig = {
     target: "ethers-v6"
   }
 };
-
-export default config;

@@ -47,6 +47,34 @@ Deno.serve(async (req) => {
     const adRequest: AdRequest = await req.json()
     const { publisherId, slotId, userId, context } = adRequest
 
+    // Basic bot detection
+    const userAgent = req.headers.get('user-agent') || ''
+    const botPatterns = [/bot/i, /crawler/i, /spider/i, /headless/i, /externalhit/i]
+    if (botPatterns.some(pattern => pattern.test(userAgent))) {
+      return new Response(
+        JSON.stringify({ error: 'Bot traffic detected' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403 }
+      )
+    }
+
+    // Validate consent if userId is provided
+    if (userId) {
+      const { data: consent } = await supabase
+        .from('consents')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('scope', 'marketplace')
+        .eq('is_active', true)
+        .maybeSingle()
+
+      if (!consent) {
+        return new Response(
+          JSON.stringify({ error: 'User consent required', code: 'CONSENT_REQUIRED' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403 }
+        )
+      }
+    }
+
     // Validate publisher
     const { data: publisher, error: publisherError } = await supabase
       .from('publishers')

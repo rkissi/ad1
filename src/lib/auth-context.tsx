@@ -206,19 +206,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (updateError) {
           console.error('Error updating profile:', updateError);
+          throw new Error(`Database error saving profile: ${updateError.message}`);
         }
 
         // Create role-specific record
         if (role === 'advertiser') {
-          await supabase.from('advertisers').insert({
+          const { error: advertiserError } = await supabase.from('advertisers').insert({
             user_id: data.user.id,
             company_name: name,
           });
+          if (advertiserError) {
+            console.error('Error creating advertiser record:', advertiserError);
+            throw new Error(`Database error saving advertiser: ${advertiserError.message}`);
+          }
         } else if (role === 'publisher') {
-          await supabase.from('publishers').insert({
+          const { error: publisherError } = await supabase.from('publishers').insert({
             user_id: data.user.id,
             name: name,
           });
+          if (publisherError) {
+            console.error('Error creating publisher record:', publisherError);
+            throw new Error(`Database error saving publisher: ${publisherError.message}`);
+          }
         }
 
         const userProfile = await fetchProfile(data.user.id);
