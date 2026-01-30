@@ -63,6 +63,7 @@ function AppContent() {
   const { user, isAuthenticated, isLoading, login, register, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const tempoRoutes = useRoutes(routes);
 
   // Redirect authenticated users away from login page
   useEffect(() => {
@@ -214,7 +215,7 @@ function AppContent() {
             } 
           />
         </Routes>
-        {import.meta.env.VITE_TEMPO === "true" && useRoutes(routes)}
+        {import.meta.env.VITE_TEMPO === "true" && tempoRoutes}
       </>
     </Suspense>
   );
