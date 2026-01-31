@@ -5,6 +5,8 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { normalizeEmail, validateEmail } from '@/lib/validation';
+
 import { 
   Shield, 
   Coins, 
@@ -46,14 +48,23 @@ function LandingPage({ onLogin, onRegister }: LandingPageProps) {
     setError(null);
     setSuccess(null);
 
+    const normalizedEmail = normalizeEmail(formData.email);
+    const name = formData.name.trim();
+
     // Validation
-    if (!formData.email || !formData.password) {
+    if (!normalizedEmail || !formData.password) {
       setError('Please fill in all required fields');
       setIsLoading(false);
       return;
     }
 
-    if (type === 'register' && !formData.name) {
+    if (!validateEmail(normalizedEmail)) {
+      setError('Please enter a valid email address');
+      setIsLoading(false);
+      return;
+    }
+
+    if (type === 'register' && !name) {
       setError('Please enter your full name');
       setIsLoading(false);
       return;
@@ -68,17 +79,17 @@ function LandingPage({ onLogin, onRegister }: LandingPageProps) {
     try {
       if (type === 'login' && onLogin) {
         await onLogin({ 
-          email: formData.email, 
+          email: normalizedEmail,
           password: formData.password, 
           role: formData.role 
         });
         setSuccess('Login successful! Redirecting to your dashboard...');
       } else if (type === 'register' && onRegister) {
         await onRegister({ 
-          email: formData.email, 
+          email: normalizedEmail,
           password: formData.password, 
           role: formData.role,
-          name: formData.name 
+          name: name
         });
         setSuccess('Account created successfully! Redirecting to your dashboard...');
       }
