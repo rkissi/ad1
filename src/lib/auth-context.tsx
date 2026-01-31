@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { normalizeEmail, validateEmail } from './validation';
 import type { User as SupabaseUser, Session } from '@supabase/supabase-js';
 import type { Profile, UserRole } from '@/types/supabase';
 
@@ -30,7 +31,6 @@ export interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Transform Supabase profile to User interface
 const profileToUser = (profile: Profile): User => ({
   id: profile.id,
   did: profile.did || `did:metaverse:${profile.id}`,
@@ -175,14 +175,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const register = async (email: string, password: string, name: string, role: UserRole) => {
     setIsLoading(true);
     
+    const normalizedEmail = normalizeEmail(email);
+    const normalizedName = name.trim();
+
+    // Client-side validation before hitting Supabase
+    if (!validateEmail(normalizedEmail)) {
+      setIsLoading(false);
+      throw new Error(`Invalid email format: "${normalizedEmail}"`);
+    }
+
     try {
-      console.log('Attempting Supabase signUp for:', email);
       const { data, error } = await supabase.auth.signUp({
-        email,
+        email: normalizedEmail,
         password,
         options: {
           data: {
-            display_name: name,
+            display_name: normalizedName,
             role: role,
           },
         },
@@ -194,8 +202,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (data.user) {
-        console.log('User created in auth.users:', data.user.id);
-        
         // Poll for profile creation (handled by trigger)
         let userProfile = null;
         let attempts = 0;
@@ -203,7 +209,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         while (!userProfile && attempts < maxAttempts) {
           attempts++;
-          console.log(`Polling for profile (attempt ${attempts})...`);
           userProfile = await fetchProfile(data.user.id);
           if (!userProfile) {
             await new Promise(resolve => setTimeout(resolve, 1000));
@@ -280,17 +285,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setProfile(userProfile);
           setUser(profileToUser(userProfile));
         }
-        
-        console.log('✅ Registration process completed for:', email);
       }
     } catch (error: any) {
-      console.error('❌ Registration error detail:', {
-        message: error.message,
-        error,
-        stack: error.stack,
-        email,
-        role
-      });
+      console.error('❌ Registration error:', error.message || error);
       throw error;
     } finally {
       setIsLoading(false);
