@@ -74,13 +74,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
+    // Safety timeout to ensure loading screen doesn't hang indefinitely
+    const timeoutId = setTimeout(() => {
+      if (mounted && isLoading) {
+        console.warn('Auth initialization timed out, forcing isLoading to false');
+        setIsLoading(false);
+      }
+    }, 5000);
+
     const initializeAuth = async () => {
       try {
+        console.log('Initializing auth state...');
         // Get current session
         const { data: { session: currentSession }, error } = await supabase.auth.getSession();
         
         if (error) {
           console.error('Error getting session:', error);
+          if (mounted) setIsLoading(false);
           return;
         }
 
@@ -97,7 +107,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.error('Auth initialization error:', error);
       } finally {
         if (mounted) {
+          console.log('Auth initialization complete');
           setIsLoading(false);
+          clearTimeout(timeoutId);
         }
       }
     };
@@ -113,26 +125,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         setSession(newSession);
 
-        if (event === 'SIGNED_IN' && newSession?.user) {
-          const userProfile = await fetchProfile(newSession.user.id);
-          if (userProfile && mounted) {
-            setProfile(userProfile);
-            setUser(profileToUser(userProfile));
+        try {
+          if (event === 'SIGNED_IN' && newSession?.user) {
+            const userProfile = await fetchProfile(newSession.user.id);
+            if (userProfile && mounted) {
+              setProfile(userProfile);
+              setUser(profileToUser(userProfile));
+            }
+          } else if (event === 'SIGNED_OUT') {
+            setUser(null);
+            setProfile(null);
+          } else if (event === 'TOKEN_REFRESHED' && newSession?.user) {
+            // Refresh profile on token refresh
+            const userProfile = await fetchProfile(newSession.user.id);
+            if (userProfile && mounted) {
+              setProfile(userProfile);
+              setUser(profileToUser(userProfile));
+            }
           }
-        } else if (event === 'SIGNED_OUT') {
-          setUser(null);
-          setProfile(null);
-        } else if (event === 'TOKEN_REFRESHED' && newSession?.user) {
-          // Refresh profile on token refresh
-          const userProfile = await fetchProfile(newSession.user.id);
-          if (userProfile && mounted) {
-            setProfile(userProfile);
-            setUser(profileToUser(userProfile));
+        } catch (error) {
+          console.error('Error handling auth state change:', error);
+        } finally {
+          if (mounted) {
+            setIsLoading(false);
+            clearTimeout(timeoutId);
           }
-        }
-
-        if (mounted) {
-          setIsLoading(false);
         }
       }
     );
