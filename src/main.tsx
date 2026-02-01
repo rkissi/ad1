@@ -4,10 +4,12 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App.tsx'
 import './index.css'
 
-// Note: Mock API is disabled as we use Supabase for real authentication
-// If you need to test without Supabase, uncomment the following lines:
-// import { setupMockApi } from './lib/mock-api-server'
-// setupMockApi();
+// Enable Mock API only in development or when explicitly requested
+import { setupMockApi } from './lib/mock-api-server'
+
+if (import.meta.env.DEV || import.meta.env.VITE_USE_MOCK_API === "true") {
+  setupMockApi();
+}
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
