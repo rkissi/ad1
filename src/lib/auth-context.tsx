@@ -22,6 +22,7 @@ export interface AuthContextType {
   session: Session | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  isAuthenticating: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name: string, role: UserRole) => Promise<void>;
   logout: () => Promise<void>;
@@ -43,25 +44,13 @@ const profileToUser = (profile: Profile): User => ({
   avatarUrl: profile.avatar_url || undefined,
 });
 
-const createMockProfile = (userId: string, email: string, name?: string, role: UserRole = 'user'): Profile => ({
-  id: userId,
-  email: email,
-  display_name: name || email.split('@')[0],
-  role: role,
-  did: `did:metaverse:${userId}`,
-  interests: [],
-  token_balance: 0,
-  wallet_address: '',
-  avatar_url: '',
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString()
-});
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   // Fetch user profile from database
   const fetchProfile = async (userId: string): Promise<Profile | null> => {
@@ -111,17 +100,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (currentSession?.user && mounted) {
           setSession(currentSession);
           console.log('Session found for user:', currentSession.user.email);
-          let userProfile = await fetchProfile(currentSession.user.id);
+          const userProfile = await fetchProfile(currentSession.user.id);
           
-          if (!userProfile) {
-            console.warn('Profile not found for session user, using mock profile for preview');
-            userProfile = createMockProfile(currentSession.user.id, currentSession.user.email || 'user@example.com');
-          }
-
           if (userProfile && mounted) {
             setProfile(userProfile);
             setUser(profileToUser(userProfile));
             console.log('User state initialized');
+          } else if (mounted) {
+            console.warn('Profile not found for session user');
+            // We don't throw here to allow the app to mount,
+            // but the user will be unauthenticated (isAuthenticated will be false)
           }
         }
       } catch (error) {
@@ -149,17 +137,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
           if (event === 'SIGNED_IN' && newSession?.user) {
             console.log('User signed in, fetching profile...');
-            let userProfile = await fetchProfile(newSession.user.id);
-
-            if (!userProfile) {
-              console.warn('Profile not found on SIGNED_IN, using mock profile for preview');
-              userProfile = createMockProfile(newSession.user.id, newSession.user.email || 'user@example.com');
-            }
+            const userProfile = await fetchProfile(newSession.user.id);
 
             if (userProfile && mounted) {
               setProfile(userProfile);
               setUser(profileToUser(userProfile));
               console.log('User state updated after sign in');
+            } else {
+              console.error('Profile not found on SIGNED_IN');
             }
           } else if (event === 'SIGNED_OUT') {
             setUser(null);
@@ -191,6 +176,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (email: string, password: string) => {
     console.log('Attempting login for:', email);
+    setIsAuthenticating(true);
     
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -199,55 +185,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
 
       if (error) {
-        // Fallback for demo/preview mode
-        if (email.includes('demo.com') || email === 'user@example.com') {
-          console.warn('Supabase signIn failed, using mock fallback for demo user');
-          const mockId = 'mock-id-' + email.replace(/[^a-zA-Z0-9]/g, '');
-          const role = email.includes('advertiser') ? 'advertiser' : email.includes('publisher') ? 'publisher' : 'user';
-          const mockProfile = createMockProfile(mockId, email, undefined, role as any);
-          const mockSession = {
-            user: { id: mockId, email: email },
-            access_token: 'mock-token',
-            refresh_token: 'mock-refresh',
-            expires_in: 3600,
-            token_type: 'bearer'
-          } as any;
-
-          setSession(mockSession);
-          setProfile(mockProfile);
-          setUser(profileToUser(mockProfile));
-          console.log('✅ Mock login successful:', email);
-          return;
-        }
         console.error('Supabase signIn error:', error);
         throw new Error(error.message);
       }
 
       if (data.user && data.session) {
         setSession(data.session);
-        let userProfile = await fetchProfile(data.user.id);
+        const userProfile = await fetchProfile(data.user.id);
 
-        if (!userProfile) {
-          console.warn('Profile not found after login, using mock profile');
-          userProfile = createMockProfile(data.user.id, data.user.email || email);
+        if (userProfile) {
+          setProfile(userProfile);
+          setUser(profileToUser(userProfile));
+          console.log('✅ Login successful:', email);
+        } else {
+          // In production, we might want to handle missing profiles differently,
+          // e.g., redirect to a profile completion page.
+          console.error('User profile not found after login');
+          throw new Error('User profile not found. Please contact support.');
         }
-
-        setProfile(userProfile);
-        setUser(profileToUser(userProfile));
-        console.log('✅ Login successful:', email);
       }
     } catch (error: any) {
       console.error('❌ Login error:', error);
       throw error;
+    } finally {
+      setIsAuthenticating(false);
     }
   };
 
   const register = async (email: string, password: string, name: string, role: UserRole) => {
     const normalizedEmail = normalizeEmail(email);
     const normalizedName = name.trim();
+    setIsAuthenticating(true);
 
     // Client-side validation before hitting Supabase
     if (!validateEmail(normalizedEmail)) {
+      setIsAuthenticating(false);
       throw new Error(`Invalid email format: "${normalizedEmail}"`);
     }
 
@@ -264,25 +236,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
 
       if (error) {
-        // Fallback for demo/preview mode
-        if (email.includes('demo.com') || email === 'user@example.com') {
-          console.warn('Supabase signUp failed, using mock fallback for demo user');
-          const mockId = 'mock-id-' + normalizedEmail.replace(/[^a-zA-Z0-9]/g, '');
-          const mockProfile = createMockProfile(mockId, normalizedEmail, normalizedName, role);
-          const mockSession = {
-            user: { id: mockId, email: normalizedEmail },
-            access_token: 'mock-token',
-            refresh_token: 'mock-refresh',
-            expires_in: 3600,
-            token_type: 'bearer'
-          } as any;
-
-          setSession(mockSession);
-          setProfile(mockProfile);
-          setUser(profileToUser(mockProfile));
-          console.log('✅ Mock registration successful:', normalizedEmail);
-          return;
-        }
         console.error('Supabase signUp error:', error);
         throw new Error(error.message);
       }
@@ -319,8 +272,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             .single();
 
           if (insertError) {
-            console.error('Manual profile creation failed, using mock profile:', insertError);
-            userProfile = createMockProfile(data.user.id, email, name, role);
+            console.error('Manual profile creation failed:', insertError);
+            throw new Error('Failed to create user profile. Please contact support.');
           } else {
             userProfile = newProfile;
           }
@@ -369,6 +322,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (error: any) {
       console.error('❌ Registration error:', error.message || error);
       throw error;
+    } finally {
+      setIsAuthenticating(false);
     }
   };
 
@@ -427,6 +382,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       session,
       isAuthenticated: !!user && !!session, 
       isLoading,
+      isAuthenticating,
       login, 
       register, 
       logout,
@@ -456,6 +412,7 @@ export function useAuthSafe() {
       session: null,
       isAuthenticated: false,
       isLoading: false,
+      isAuthenticating: false,
       login: async () => {},
       register: async () => {},
       logout: async () => {},
