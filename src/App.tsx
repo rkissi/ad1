@@ -130,7 +130,7 @@ function AppContent() {
                       console.log('Login call completed for:', credentials.email);
                     } catch (error: any) {
                       console.error('App.tsx login error:', error);
-                      alert(error.message || 'Login failed. Please try again.');
+                      throw error;
                     }
                   }}
                   onRegister={async (userData) => {
@@ -140,7 +140,7 @@ function AppContent() {
                       console.log('Registration call completed for:', userData.email);
                     } catch (error: any) {
                       console.error('App.tsx registration error:', error);
-                      alert(error.message || 'Registration failed. Please try again.');
+                      throw error;
                     }
                   }}
                 />

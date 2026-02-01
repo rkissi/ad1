@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 
 interface LandingPageProps {
-  onLogin?: (credentials: { email: string; password: string; role: string }) => Promise<void>;
+  onLogin?: (credentials: { email: string; password: string }) => Promise<void>;
   onRegister?: (userData: { email: string; password: string; role: string; name: string }) => Promise<void>;
 }
 
@@ -36,6 +36,7 @@ function LandingPage({ onLogin, onRegister }: LandingPageProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'login' | 'register'>('register');
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -80,8 +81,7 @@ function LandingPage({ onLogin, onRegister }: LandingPageProps) {
       if (type === 'login' && onLogin) {
         await onLogin({ 
           email: normalizedEmail,
-          password: formData.password, 
-          role: formData.role 
+          password: formData.password
         });
         setSuccess('Login successful! Redirecting to your dashboard...');
       } else if (type === 'register' && onRegister) {
@@ -230,7 +230,7 @@ function LandingPage({ onLogin, onRegister }: LandingPageProps) {
                 </Alert>
               )}
 
-              <Tabs defaultValue="register" className="w-full">
+              <Tabs defaultValue="register" className="w-full" onValueChange={(value) => setActiveTab(value as 'login' | 'register')}>
                 <TabsList className="grid w-full grid-cols-2 bg-white/10 backdrop-blur-sm">
                   <TabsTrigger value="register" className="text-white data-[state=active]:bg-white/20">
                     Sign Up
@@ -365,19 +365,12 @@ function LandingPage({ onLogin, onRegister }: LandingPageProps) {
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="login-role" className="text-white">Account Type *</Label>
-                    <select
-                      id="login-role"
-                      value={formData.role}
-                      onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                      className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-md text-white backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
-                      disabled={isLoading}
-                    >
-                      <option value="user" className="bg-purple-900">User</option>
-                      <option value="advertiser" className="bg-purple-900">Advertiser</option>
-                      <option value="publisher" className="bg-purple-900">Publisher</option>
-                    </select>
+                  {/* Info note about automatic role detection */}
+                  <div className="flex items-center space-x-2 p-3 bg-blue-500/20 border border-blue-400/30 rounded-lg">
+                    <Shield className="w-4 h-4 text-blue-300 flex-shrink-0" />
+                    <span className="text-xs text-blue-200">
+                      Your account type will be automatically detected from your profile.
+                    </span>
                   </div>
 
                   <Button
@@ -406,42 +399,44 @@ function LandingPage({ onLogin, onRegister }: LandingPageProps) {
                 </TabsContent>
               </Tabs>
 
-              {/* Role-specific benefits */}
-              <div className="mt-6 p-4 bg-white/5 rounded-lg border border-white/10">
-                <div className="flex items-center space-x-2 mb-2">
-                  {formData.role === 'user' && <Users className="w-4 h-4 text-cyan-400" />}
-                  {formData.role === 'advertiser' && <Megaphone className="w-4 h-4 text-purple-400" />}
-                  {formData.role === 'publisher' && <Globe className="w-4 h-4 text-green-400" />}
-                  <span className="text-white text-sm font-medium">
-                    {formData.role === 'user' && 'User Benefits'}
-                    {formData.role === 'advertiser' && 'Advertiser Benefits'}
-                    {formData.role === 'publisher' && 'Publisher Benefits'}
-                  </span>
+              {/* Role-specific benefits - only show for registration */}
+              {activeTab === 'register' && (
+                <div className="mt-6 p-4 bg-white/5 rounded-lg border border-white/10">
+                  <div className="flex items-center space-x-2 mb-2">
+                    {formData.role === 'user' && <Users className="w-4 h-4 text-cyan-400" />}
+                    {formData.role === 'advertiser' && <Megaphone className="w-4 h-4 text-purple-400" />}
+                    {formData.role === 'publisher' && <Globe className="w-4 h-4 text-green-400" />}
+                    <span className="text-white text-sm font-medium">
+                      {formData.role === 'user' && 'User Benefits'}
+                      {formData.role === 'advertiser' && 'Advertiser Benefits'}
+                      {formData.role === 'publisher' && 'Publisher Benefits'}
+                    </span>
+                  </div>
+                  <ul className="text-xs text-purple-200 space-y-1">
+                    {formData.role === 'user' && (
+                      <>
+                        <li>• Earn tokens for viewing relevant ads</li>
+                        <li>• Complete control over your data</li>
+                        <li>• Transparent reward tracking</li>
+                      </>
+                    )}
+                    {formData.role === 'advertiser' && (
+                      <>
+                        <li>• Reach engaged, consenting audiences</li>
+                        <li>• Transparent performance metrics</li>
+                        <li>• Smart contract-based payments</li>
+                      </>
+                    )}
+                    {formData.role === 'publisher' && (
+                      <>
+                        <li>• Maximize ad revenue with fair pricing</li>
+                        <li>• Easy SDK integration</li>
+                        <li>• Real-time analytics dashboard</li>
+                      </>
+                    )}
+                  </ul>
                 </div>
-                <ul className="text-xs text-purple-200 space-y-1">
-                  {formData.role === 'user' && (
-                    <>
-                      <li>• Earn tokens for viewing relevant ads</li>
-                      <li>• Complete control over your data</li>
-                      <li>• Transparent reward tracking</li>
-                    </>
-                  )}
-                  {formData.role === 'advertiser' && (
-                    <>
-                      <li>• Reach engaged, consenting audiences</li>
-                      <li>• Transparent performance metrics</li>
-                      <li>• Smart contract-based payments</li>
-                    </>
-                  )}
-                  {formData.role === 'publisher' && (
-                    <>
-                      <li>• Maximize ad revenue with fair pricing</li>
-                      <li>• Easy SDK integration</li>
-                      <li>• Real-time analytics dashboard</li>
-                    </>
-                  )}
-                </ul>
-              </div>
+              )}
             </CardContent>
           </Card>
 
