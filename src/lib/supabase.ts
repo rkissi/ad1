@@ -1,11 +1,20 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from '@/types/supabase';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://placeholder-project.supabase.co';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://placeholder.supabase.co';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'placeholder-key';
 
+// Check for missing environment variables and alert the developer
 if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY) {
-  console.warn('⚠️ Missing Supabase environment variables. Using placeholders for preview.');
+  const missingVars = [];
+  if (!import.meta.env.VITE_SUPABASE_URL) missingVars.push('VITE_SUPABASE_URL');
+  if (!import.meta.env.VITE_SUPABASE_ANON_KEY) missingVars.push('VITE_SUPABASE_ANON_KEY');
+
+  console.error(
+    `❌ CONFIGURATION ERROR: Missing environment variables: ${missingVars.join(', ')}. ` +
+    'Please ensure these are defined in your .env file. ' +
+    'The application will not be able to connect to Supabase.'
+  );
 }
 
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {

@@ -88,7 +88,7 @@ function AppContent() {
       case 'admin':
         return '/admin';
       default:
-        return '/';
+        return '/login'; // Redirect to login if role is unknown
     }
   };
 
@@ -153,7 +153,7 @@ function AppContent() {
             path="/" 
             element={
               <ProtectedRoute>
-                {user ? <Navigate to={getRoleDashboard(user.role)} replace /> : <Home />}
+                {user?.role ? <Navigate to={getRoleDashboard(user.role)} replace /> : <Home />}
               </ProtectedRoute>
             } 
           />

@@ -22,6 +22,7 @@ export interface AuthContextType {
   session: Session | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  isAuthenticating: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name: string, role: UserRole) => Promise<void>;
   logout: () => Promise<void>;
@@ -43,11 +44,13 @@ const profileToUser = (profile: Profile): User => ({
   avatarUrl: profile.avatar_url || undefined,
 });
 
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   // Fetch user profile from database
   const fetchProfile = async (userId: string): Promise<Profile | null> => {
@@ -96,11 +99,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (currentSession?.user && mounted) {
           setSession(currentSession);
+          console.log('Session found for user:', currentSession.user.email);
           const userProfile = await fetchProfile(currentSession.user.id);
           
           if (userProfile && mounted) {
             setProfile(userProfile);
             setUser(profileToUser(userProfile));
+            console.log('User state initialized');
+          } else if (mounted) {
+            console.warn('Profile not found for session user');
+            // We don't throw here to allow the app to mount,
+            // but the user will be unauthenticated (isAuthenticated will be false)
           }
         }
       } catch (error) {
@@ -127,10 +136,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         try {
           if (event === 'SIGNED_IN' && newSession?.user) {
+            console.log('User signed in, fetching profile...');
             const userProfile = await fetchProfile(newSession.user.id);
+
             if (userProfile && mounted) {
               setProfile(userProfile);
               setUser(profileToUser(userProfile));
+              console.log('User state updated after sign in');
+            } else {
+              console.error('Profile not found on SIGNED_IN');
             }
           } else if (event === 'SIGNED_OUT') {
             setUser(null);
@@ -161,7 +175,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string) => {
-    setIsLoading(true);
+    console.log('Attempting login for:', email);
+    setIsAuthenticating(true);
     
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -170,34 +185,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
 
       if (error) {
+        console.error('Supabase signIn error:', error);
         throw new Error(error.message);
       }
 
-      if (data.user) {
+      if (data.user && data.session) {
+        setSession(data.session);
         const userProfile = await fetchProfile(data.user.id);
+
         if (userProfile) {
           setProfile(userProfile);
           setUser(profileToUser(userProfile));
+          console.log('✅ Login successful:', email);
+        } else {
+          // In production, we might want to handle missing profiles differently,
+          // e.g., redirect to a profile completion page.
+          console.error('User profile not found after login');
+          throw new Error('User profile not found. Please contact support.');
         }
-        console.log('✅ Login successful:', email);
       }
     } catch (error: any) {
       console.error('❌ Login error:', error);
       throw error;
     } finally {
-      setIsLoading(false);
+      setIsAuthenticating(false);
     }
   };
 
   const register = async (email: string, password: string, name: string, role: UserRole) => {
-    setIsLoading(true);
-    
     const normalizedEmail = normalizeEmail(email);
     const normalizedName = name.trim();
+    setIsAuthenticating(true);
 
     // Client-side validation before hitting Supabase
     if (!validateEmail(normalizedEmail)) {
-      setIsLoading(false);
+      setIsAuthenticating(false);
       throw new Error(`Invalid email format: "${normalizedEmail}"`);
     }
 
@@ -219,6 +241,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (data.user) {
+        if (data.session) setSession(data.session);
+
         // Poll for profile creation (handled by trigger)
         let userProfile = null;
         let attempts = 0;
@@ -249,6 +273,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           if (insertError) {
             console.error('Manual profile creation failed:', insertError);
+            throw new Error('Failed to create user profile. Please contact support.');
           } else {
             userProfile = newProfile;
           }
@@ -270,32 +295,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         // Create role-specific record if session is available (RLS requirement)
-        if (data.session || (await supabase.auth.getSession()).data.session) {
+        const currentSession = data.session || (await supabase.auth.getSession()).data.session;
+        if (currentSession) {
           if (role === 'advertiser') {
-            const { error: advertiserError } = await supabase
+            await supabase
               .from('advertisers')
               .upsert({
                 user_id: data.user.id,
                 company_name: name,
               }, { onConflict: 'user_id' });
-
-            if (advertiserError) {
-              console.error('Error saving advertiser record:', advertiserError);
-            }
           } else if (role === 'publisher') {
-            const { error: publisherError } = await supabase
+            await supabase
               .from('publishers')
               .upsert({
                 user_id: data.user.id,
                 name: name,
               }, { onConflict: 'user_id' });
-
-            if (publisherError) {
-              console.error('Error saving publisher record:', publisherError);
-            }
           }
-        } else {
-          console.warn('No active session after registration, skipping role-specific record creation');
         }
 
         if (userProfile) {
@@ -307,7 +323,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error('❌ Registration error:', error.message || error);
       throw error;
     } finally {
-      setIsLoading(false);
+      setIsAuthenticating(false);
     }
   };
 
@@ -366,6 +382,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       session,
       isAuthenticated: !!user && !!session, 
       isLoading,
+      isAuthenticating,
       login, 
       register, 
       logout,
@@ -395,6 +412,7 @@ export function useAuthSafe() {
       session: null,
       isAuthenticated: false,
       isLoading: false,
+      isAuthenticating: false,
       login: async () => {},
       register: async () => {},
       logout: async () => {},
