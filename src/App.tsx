@@ -36,6 +36,65 @@ function FullScreenLoader() {
   );
 }
 
+// Root Route Component - Handles logic for /
+function RootRoute() {
+  const { isAuthenticated, profile, isLoading, login, register } = useAuth();
+
+  if (isLoading) {
+    return <FullScreenLoader />;
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <LandingPage
+        onLogin={async (credentials) => {
+          try {
+            await login(credentials.email, credentials.password);
+          } catch (error: any) {
+            console.error('App.tsx login error:', error);
+            throw error;
+          }
+        }}
+        onRegister={async (userData) => {
+          try {
+            await register(userData.email, userData.password, userData.name, userData.role as any);
+          } catch (error: any) {
+            console.error('App.tsx registration error:', error);
+            throw error;
+          }
+        }}
+      />
+    );
+  }
+
+  // Authenticated: Check onboarding status
+  if (profile?.onboarding_status !== 'completed') {
+    return <Navigate to="/onboarding" replace />;
+  }
+
+  // Completed: Redirect to dashboard
+  return <Navigate to={getRoleDashboard(profile?.role)} replace />;
+}
+
+// Onboarding Route Component - Handles logic for /onboarding
+function OnboardingRoute() {
+  const { isAuthenticated, profile, isLoading } = useAuth();
+
+  if (isLoading) {
+    return <FullScreenLoader />;
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/" replace />;
+  }
+
+  if (profile?.onboarding_status === 'completed') {
+    return <Navigate to={getRoleDashboard(profile.role)} replace />;
+  }
+
+  return <OnboardingPage />;
+}
+
 // Protected Route Component with RBAC
 function ProtectedRoute({ 
   children, 
@@ -97,66 +156,26 @@ function TempoRoutes() {
 }
 
 function AppContent() {
-  const { user, profile, isAuthenticated, isLoading, login, register, logout } = useAuth();
+  const { isLoading, logout } = useAuth();
 
   if (isLoading) {
     return <FullScreenLoader />;
   }
 
-  // Determine redirect for root path
-  const handleRootRedirect = () => {
-      if (!isAuthenticated) return null;
-      if (profile?.onboarding_status !== 'completed') return <Navigate to="/onboarding" replace />;
-      return <Navigate to={getRoleDashboard(profile?.role)} replace />;
-  };
-
   return (
     <Suspense fallback={<FullScreenLoader />}>
       <>
         <Routes>
-          {/* Landing Page (/) */}
+          {/* Root Route (/) - Unconditional match */}
           <Route 
             path="/"
-            element={
-              !isAuthenticated ? (
-                <LandingPage 
-                  onLogin={async (credentials) => {
-                    try {
-                      await login(credentials.email, credentials.password);
-                    } catch (error: any) {
-                      console.error('App.tsx login error:', error);
-                      throw error;
-                    }
-                  }}
-                  onRegister={async (userData) => {
-                    try {
-                      await register(userData.email, userData.password, userData.name, userData.role as any);
-                    } catch (error: any) {
-                      console.error('App.tsx registration error:', error);
-                      throw error;
-                    }
-                  }}
-                />
-              ) : (
-                  handleRootRedirect() || <Home />
-              )
-            } 
+            element={<RootRoute />}
           />
 
-          {/* Onboarding Route */}
+          {/* Onboarding Route - Unconditional match */}
           <Route
              path="/onboarding"
-             element={
-                 isAuthenticated ? (
-                     profile?.onboarding_status === 'completed' ? (
-                         <Navigate to={getRoleDashboard(profile.role)} replace />
-                     ) : (
-                         <OnboardingPage />
-                     )
-                 ) : (
-                     <Navigate to="/" replace />
-                 )
-             }
+             element={<OnboardingRoute />}
           />
 
           {/* Protected Routes with RBAC */}

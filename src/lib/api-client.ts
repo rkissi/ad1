@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+// Use relative path for API calls to support Tempo/Vite integrated environment
+const API_BASE_URL = '/api';
 
 export async function authenticatedFetch(endpoint: string, options: RequestInit = {}) {
   const { data: { session } } = await supabase.auth.getSession();
