@@ -155,6 +155,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (email: string, password: string) => {
     console.log('Attempting login for:', email);
+
+    // Prevent concurrent login attempts
+    if (isAuthenticating) return;
+
     setIsAuthenticating(true);
     
     try {
@@ -189,7 +193,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
     } catch (error: any) {
-      console.error('❌ Login error:', error);
+      // Don't log if it's an abort error which is expected during hot reloads or fast UI switches
+      if (!error.message?.includes('AbortError')) {
+          console.error('❌ Login error:', error);
+      }
       throw error;
     } finally {
       setIsAuthenticating(false);
@@ -199,6 +206,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const register = async (email: string, password: string, name: string, role: UserRole) => {
     const normalizedEmail = normalizeEmail(email);
     const normalizedName = name.trim();
+
+    // Prevent concurrent registration attempts
+    if (isAuthenticating) return;
+
     setIsAuthenticating(true);
 
     if (!validateEmail(normalizedEmail)) {
@@ -258,7 +269,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
     } catch (error: any) {
-      console.error('❌ Registration error:', error.message || error);
+      if (!error.message?.includes('AbortError')) {
+          console.error('❌ Registration error:', error.message || error);
+      }
       throw error;
     } finally {
       setIsAuthenticating(false);
