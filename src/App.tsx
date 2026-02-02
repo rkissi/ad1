@@ -9,6 +9,32 @@ import PublisherDemo from "./components/PublisherDemo";
 import AdminDashboard from "./components/AdminDashboard";
 import routes from "tempo-routes";
 
+const roleDashboardMap: Record<string, string> = {
+  user: '/user',
+  advertiser: '/advertiser',
+  publisher: '/publisher',
+  admin: '/admin'
+};
+
+// Get dashboard route based on user role
+const getRoleDashboard = (role?: string) => {
+  if (role && roleDashboardMap[role]) {
+    return roleDashboardMap[role];
+  }
+  return '/';
+};
+
+function FullScreenLoader() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-violet-900 via-purple-900 to-indigo-900">
+      <div className="text-center">
+        <div className="w-16 h-16 border-4 border-white/30 border-t-white rounded-full animate-spin mx-auto mb-4"></div>
+        <p className="text-white text-lg">Loading...</p>
+      </div>
+    </div>
+  );
+}
+
 // Protected Route Component with RBAC
 function ProtectedRoute({ 
   children, 
@@ -32,7 +58,8 @@ function ProtectedRoute({
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    // Redirect to landing page (/) instead of /login
+    return <Navigate to="/" state={{ from: location }} replace />;
   }
 
   // Check role-based access
@@ -64,70 +91,25 @@ function TempoRoutes() {
 }
 
 function AppContent() {
-  const { user, isAuthenticated, isLoading, login, register, logout } = useAuth();
-  const navigate = useNavigate();
-  const location = useLocation();
+  const { user, profile, isAuthenticated, isLoading, login, register, logout } = useAuth();
 
-  // Redirect authenticated users away from login page
-  useEffect(() => {
-    if (isAuthenticated && location.pathname === '/login') {
-      const from = (location.state as any)?.from?.pathname || getRoleDashboard(user?.role);
-      navigate(from, { replace: true });
-    }
-  }, [isAuthenticated, location, navigate, user]);
-
-  // Get dashboard route based on user role
-  const getRoleDashboard = (role?: string) => {
-    switch (role) {
-      case 'user':
-        return '/user';
-      case 'advertiser':
-        return '/advertiser';
-      case 'publisher':
-        return '/publisher';
-      case 'admin':
-        return '/admin';
-      default:
-        return '/login'; // Redirect to login if role is unknown
-    }
-  };
-
-  // Show loading spinner while checking authentication
   if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-violet-900 via-purple-900 to-indigo-900">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-white/30 border-t-white rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-white text-lg">Loading...</p>
-        </div>
-      </div>
-    );
+    return <FullScreenLoader />;
   }
 
   return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-8 h-8 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin mx-auto mb-2"></div>
-          <p>Loading...</p>
-        </div>
-      </div>
-    }>
+    <Suspense fallback={<FullScreenLoader />}>
       <>
         <Routes>
-          {/* Explicit Public Routes */}
+          {/* Landing Page (/) handles both Landing and Dashboard Redirection */}
           <Route 
-            path="/login" 
+            path="/"
             element={
-              isAuthenticated ? (
-                <Navigate to={getRoleDashboard(user?.role)} replace />
-              ) : (
+              !isAuthenticated ? (
                 <LandingPage 
                   onLogin={async (credentials) => {
                     try {
-                      console.log('Attempting login for:', credentials.email);
                       await login(credentials.email, credentials.password);
-                      console.log('Login call completed for:', credentials.email);
                     } catch (error: any) {
                       console.error('App.tsx login error:', error);
                       throw error;
@@ -135,29 +117,22 @@ function AppContent() {
                   }}
                   onRegister={async (userData) => {
                     try {
-                      console.log('Attempting registration for:', userData.email);
                       await register(userData.email, userData.password, userData.name, userData.role as any);
-                      console.log('Registration call completed for:', userData.email);
                     } catch (error: any) {
                       console.error('App.tsx registration error:', error);
                       throw error;
                     }
                   }}
                 />
+              ) : profile?.role ? (
+                <Navigate to={getRoleDashboard(profile.role)} replace />
+              ) : (
+                <Home />
               )
             } 
           />
 
           {/* Protected Routes with RBAC */}
-          <Route 
-            path="/" 
-            element={
-              <ProtectedRoute>
-                {user?.role ? <Navigate to={getRoleDashboard(user.role)} replace /> : <Home />}
-              </ProtectedRoute>
-            } 
-          />
-
           <Route 
             path="/home" 
             element={
@@ -210,15 +185,15 @@ function AppContent() {
             } 
           />
 
-          {/* Catch all - redirect to login or dashboard */}
+          {/* Catch all - redirect to landing page (/) */}
+          <Route
+            path="/login"
+            element={<Navigate to="/" replace />}
+          />
           <Route 
             path="*" 
             element={
-              isAuthenticated ? (
-                <Navigate to={getRoleDashboard(user?.role)} replace />
-              ) : (
-                <Navigate to="/login" replace />
-              )
+              <Navigate to="/" replace />
             } 
           />
         </Routes>
@@ -243,7 +218,7 @@ function LogoutPage({ onLogout }: { onLogout: () => Promise<void> }) {
       } catch (error) {
         console.error('Logout error:', error);
       }
-      navigate('/login', { replace: true });
+      navigate('/', { replace: true });
     };
     performLogout();
   }, [onLogout, navigate]);

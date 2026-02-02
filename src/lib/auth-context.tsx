@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { normalizeEmail, validateEmail } from './validation';
-import type { User as SupabaseUser, Session } from '@supabase/supabase-js';
+import type { Session } from '@supabase/supabase-js';
 import type { Profile, UserRole } from '@/types/supabase';
 
 export interface User {
@@ -52,81 +52,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
 
-  // Fetch user profile from database
-  const fetchProfile = async (userId: string): Promise<Profile | null> => {
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
-      if (error) {
-        // Check for RLS-related errors and handle gracefully
-        if (error.code === '42P17') {
-          console.error('RLS policy error - please check database policies:', error);
-        } else if (error.code === 'PGRST116') {
-          // No rows returned - profile doesn't exist yet
-          console.log('Profile not found for user:', userId);
-        } else {
-          console.error('Error fetching profile:', error);
-        }
-        return null;
-      }
-
-      return data;
-    } catch (error) {
-      console.error('Error fetching profile:', error);
-      return null;
-    }
-  };
-
   // Initialize auth state
   useEffect(() => {
     let mounted = true;
 
-    // Safety timeout to ensure loading screen doesn't hang indefinitely
-    const timeoutId = setTimeout(() => {
-      if (mounted && isLoading) {
-        console.warn('Auth initialization timed out, forcing isLoading to false');
-        setIsLoading(false);
-      }
-    }, 5000);
-
     const initializeAuth = async () => {
       try {
         console.log('Initializing auth state...');
-        // Get current session
-        const { data: { session: currentSession }, error } = await supabase.auth.getSession();
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
         
-        if (error) {
-          console.error('Error getting session:', error);
-          if (mounted) setIsLoading(false);
+        if (!currentSession?.user) {
+          if (mounted) {
+            setUser(null);
+            setProfile(null);
+            setSession(null);
+          }
           return;
         }
 
-        if (currentSession?.user && mounted) {
-          setSession(currentSession);
-          console.log('Session found for user:', currentSession.user.email);
-          const userProfile = await fetchProfile(currentSession.user.id);
-          
-          if (userProfile && mounted) {
+        if (mounted) setSession(currentSession);
+
+        const { data: userProfile, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', currentSession.user.id)
+          .maybeSingle();
+
+        if (error) throw error;
+
+        if (mounted) {
+          if (userProfile) {
             setProfile(userProfile);
             setUser(profileToUser(userProfile));
             console.log('User state initialized');
-          } else if (mounted) {
+          } else {
             console.warn('Profile not found for session user');
-            // We don't throw here to allow the app to mount,
-            // but the user will be unauthenticated (isAuthenticated will be false)
+            setProfile(null);
+            setUser(null);
           }
         }
       } catch (error) {
         console.error('Auth initialization error:', error);
+        if (mounted) {
+          setUser(null);
+          setProfile(null);
+        }
       } finally {
         if (mounted) {
           console.log('Auth initialization complete');
           setIsLoading(false);
-          clearTimeout(timeoutId);
         }
       }
     };
@@ -140,38 +114,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
         if (!mounted) return;
 
+        if (!newSession?.user) {
+          setUser(null);
+          setProfile(null);
+          setSession(null);
+          return;
+        }
+
         setSession(newSession);
 
         try {
-          if (event === 'SIGNED_IN' && newSession?.user) {
-            console.log('User signed in, fetching profile...');
-            const userProfile = await fetchProfile(newSession.user.id);
+          const { data: userProfile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', newSession.user.id)
+            .maybeSingle();
 
-            if (userProfile && mounted) {
+          if (mounted) {
+            if (userProfile) {
               setProfile(userProfile);
               setUser(profileToUser(userProfile));
-              console.log('User state updated after sign in');
             } else {
-              console.error('Profile not found on SIGNED_IN');
-            }
-          } else if (event === 'SIGNED_OUT') {
-            setUser(null);
-            setProfile(null);
-          } else if (event === 'TOKEN_REFRESHED' && newSession?.user) {
-            // Refresh profile on token refresh
-            const userProfile = await fetchProfile(newSession.user.id);
-            if (userProfile && mounted) {
-              setProfile(userProfile);
-              setUser(profileToUser(userProfile));
+              setProfile(null);
+              setUser(null);
             }
           }
         } catch (error) {
           console.error('Error handling auth state change:', error);
-        } finally {
-          if (mounted) {
-            setIsLoading(false);
-            clearTimeout(timeoutId);
-          }
         }
       }
     );
@@ -200,50 +169,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (data.user && data.session) {
         setSession(data.session);
         
-        // Try to fetch profile with retries
-        let userProfile = null;
-        let attempts = 0;
-        const maxAttempts = 5;
-        
-        while (!userProfile && attempts < maxAttempts) {
-          attempts++;
-          userProfile = await fetchProfile(data.user.id);
-          if (!userProfile && attempts < maxAttempts) {
-            console.log(`Profile fetch attempt ${attempts} failed, retrying...`);
-            await new Promise(resolve => setTimeout(resolve, 500));
-          }
-        }
+        const { data: userProfile, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', data.user.id)
+          .maybeSingle();
+
+        if (profileError) throw profileError;
 
         if (userProfile) {
           setProfile(userProfile);
           setUser(profileToUser(userProfile));
           console.log('✅ Login successful:', email);
         } else {
-          // Profile doesn't exist - this might happen for users created before profile trigger
-          // Attempt to create profile from auth metadata
-          console.warn('Profile not found, attempting to create from auth metadata...');
-          
-          const userMetadata = data.user.user_metadata || {};
-          const { data: newProfile, error: createError } = await supabase
-            .from('profiles')
-            .upsert({
-              id: data.user.id,
-              email: data.user.email || email,
-              display_name: userMetadata.display_name || email.split('@')[0],
-              role: userMetadata.role || 'user',
-              did: `did:metaverse:${data.user.id}`
-            })
-            .select()
-            .single();
-
-          if (createError) {
-            console.error('Failed to create profile:', createError);
-            throw new Error('Unable to load or create user profile. Please try again or contact support.');
-          }
-
-          setProfile(newProfile);
-          setUser(profileToUser(newProfile));
-          console.log('✅ Login successful (profile created):', email);
+          console.warn('Profile not found for user:', data.user.id);
+          // Handle case where profile might not be created yet
         }
       }
     } catch (error: any) {
@@ -259,7 +199,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const normalizedName = name.trim();
     setIsAuthenticating(true);
 
-    // Client-side validation before hitting Supabase
     if (!validateEmail(normalizedEmail)) {
       setIsAuthenticating(false);
       throw new Error(`Invalid email format: "${normalizedEmail}"`);
@@ -285,80 +224,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (data.user) {
         if (data.session) setSession(data.session);
 
-        // Poll for profile creation (handled by trigger)
-        let userProfile = null;
-        let attempts = 0;
-        const maxAttempts = 10;
+        // Fetch profile once (no polling as per requirement)
+        const { data: userProfile, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', data.user.id)
+          .maybeSingle();
 
-        while (!userProfile && attempts < maxAttempts) {
-          attempts++;
-          userProfile = await fetchProfile(data.user.id);
-          if (!userProfile) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          }
+        if (!profileError && userProfile) {
+          setProfile(userProfile);
+          setUser(profileToUser(userProfile));
         }
 
-        if (!userProfile) {
-          console.warn('Profile not found after polling, attempting manual creation');
-          // Manual fallback if trigger fails or is slow
-          const { data: newProfile, error: insertError } = await supabase
-            .from('profiles')
-            .upsert({
-              id: data.user.id,
-              email: email,
-              display_name: name,
-              role: role,
-              did: `did:metaverse:${data.user.id}`
-            })
-            .select()
-            .single();
-
-          if (insertError) {
-            console.error('Manual profile creation failed:', insertError);
-            throw new Error('Failed to create user profile. Please contact support.');
-          } else {
-            userProfile = newProfile;
-          }
-        } else {
-          // Update profile if it exists but might need fresh data
-          const { data: updatedProfile, error: updateError } = await supabase
-            .from('profiles')
-            .update({
-              display_name: name,
-              role: role
-            })
-            .eq('id', data.user.id)
-            .select()
-            .single();
-
-          if (!updateError) {
-            userProfile = updatedProfile;
-          }
-        }
-
-        // Create role-specific record if session is available (RLS requirement)
-        const currentSession = data.session || (await supabase.auth.getSession()).data.session;
-        if (currentSession) {
+        // Handle role-specific records if session exists
+        if (data.session) {
           if (role === 'advertiser') {
             await supabase
               .from('advertisers')
               .upsert({
                 user_id: data.user.id,
-                company_name: name,
+                company_name: normalizedName,
               }, { onConflict: 'user_id' });
           } else if (role === 'publisher') {
             await supabase
               .from('publishers')
               .upsert({
                 user_id: data.user.id,
-                name: name,
+                name: normalizedName,
               }, { onConflict: 'user_id' });
           }
-        }
-
-        if (userProfile) {
-          setProfile(userProfile);
-          setUser(profileToUser(userProfile));
         }
       }
     } catch (error: any) {
@@ -410,7 +304,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshProfile = async () => {
     if (!session?.user?.id) return;
 
-    const userProfile = await fetchProfile(session.user.id);
+    const { data: userProfile } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', session.user.id)
+      .maybeSingle();
+
     if (userProfile) {
       setProfile(userProfile);
       setUser(profileToUser(userProfile));
