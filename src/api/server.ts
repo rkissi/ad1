@@ -1,4 +1,6 @@
 // Production API Server for Metaverse Advertising Platform
+import dotenv from 'dotenv';
+dotenv.config();
 import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -13,6 +15,7 @@ import AnalyticsDashboardService from '../lib/analytics-dashboard';
 import { environmentManager, logger } from '../lib/environment-manager';
 import { paymentRouter } from './payment-routes';
 import adminRouter from './admin-routes';
+import { onboardingRouter } from './onboarding-routes';
 
 export class ApiServer {
   private app: Express;
@@ -475,6 +478,7 @@ export class ApiServer {
     // Mount routers
     this.app.use('/api/v1/payments', paymentRouter);
     this.app.use('/api/v1/admin', adminRouter);
+    this.app.use('/api/onboarding', onboardingRouter);
 
     // Metrics endpoint
     this.app.get('/metrics', async (req, res) => {

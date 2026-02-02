@@ -10,12 +10,29 @@ export interface ContractConfig {
   networkId: number;
 }
 
+// Helper to get environment variables safely in both Node and Browser/Vite
+const getEnv = (key: string, defaultValue: string): string => {
+  if (typeof process !== 'undefined' && process.env && process.env[key]) {
+    return process.env[key] as string;
+  }
+  try {
+    // @ts-ignore
+    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
+      // @ts-ignore
+      return import.meta.env[key] as string;
+    }
+  } catch (e) {
+    // import.meta may not be available
+  }
+  return defaultValue;
+};
+
 export const DEFAULT_CONTRACT_CONFIG: ContractConfig = {
-  rpcUrl: import.meta.env.VITE_ETHEREUM_RPC_URL || 'http://localhost:8545',
-  privateKey: import.meta.env.VITE_PRIVATE_KEY || '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
-  marketplaceAddress: import.meta.env.VITE_MARKETPLACE_CONTRACT_ADDRESS || '0x' + '1'.repeat(40),
-  tokenAddress: import.meta.env.VITE_TOKEN_CONTRACT_ADDRESS || '0x' + '2'.repeat(40),
-  networkId: parseInt(import.meta.env.VITE_NETWORK_ID || '31337')
+  rpcUrl: getEnv('VITE_ETHEREUM_RPC_URL', 'http://localhost:8545'),
+  privateKey: getEnv('VITE_PRIVATE_KEY', '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'),
+  marketplaceAddress: getEnv('VITE_MARKETPLACE_CONTRACT_ADDRESS', '0x' + '1'.repeat(40)),
+  tokenAddress: getEnv('VITE_TOKEN_CONTRACT_ADDRESS', '0x' + '2'.repeat(40)),
+  networkId: parseInt(getEnv('VITE_NETWORK_ID', '31337'))
 };
 
 // Contract ABIs (simplified for demo)

@@ -14,6 +14,7 @@ export interface User {
   walletAddress?: string;
   tokenBalance?: number;
   avatarUrl?: string;
+  onboardingStatus: string;
 }
 
 export interface AuthContextType {
@@ -42,6 +43,7 @@ const profileToUser = (profile: Profile): User => ({
   walletAddress: profile.wallet_address || undefined,
   tokenBalance: profile.token_balance || 0,
   avatarUrl: profile.avatar_url || undefined,
+  onboardingStatus: profile.onboarding_status || 'not_started',
 });
 
 

@@ -7,6 +7,7 @@ import UserApp from "./components/UserApp";
 import AdvertiserDashboard from "./components/AdvertiserDashboard";
 import PublisherDemo from "./components/PublisherDemo";
 import AdminDashboard from "./components/AdminDashboard";
+import OnboardingPage from "./components/OnboardingPage";
 import routes from "tempo-routes";
 
 const roleDashboardMap: Record<string, string> = {
@@ -38,12 +39,12 @@ function FullScreenLoader() {
 // Protected Route Component with RBAC
 function ProtectedRoute({ 
   children, 
-  allowedRoles 
+  allowedRoles,
 }: { 
   children: React.ReactNode; 
   allowedRoles?: Array<'user' | 'advertiser' | 'publisher' | 'admin'>;
 }) {
-  const { isAuthenticated, user, isLoading } = useAuth();
+  const { isAuthenticated, user, profile, isLoading } = useAuth();
   const location = useLocation();
 
   if (isLoading) {
@@ -60,6 +61,11 @@ function ProtectedRoute({
   if (!isAuthenticated) {
     // Redirect to landing page (/) instead of /login
     return <Navigate to="/" state={{ from: location }} replace />;
+  }
+
+  // Check onboarding status
+  if (profile?.onboarding_status !== 'completed') {
+      return <Navigate to="/onboarding" replace />;
   }
 
   // Check role-based access
@@ -97,11 +103,18 @@ function AppContent() {
     return <FullScreenLoader />;
   }
 
+  // Determine redirect for root path
+  const handleRootRedirect = () => {
+      if (!isAuthenticated) return null;
+      if (profile?.onboarding_status !== 'completed') return <Navigate to="/onboarding" replace />;
+      return <Navigate to={getRoleDashboard(profile?.role)} replace />;
+  };
+
   return (
     <Suspense fallback={<FullScreenLoader />}>
       <>
         <Routes>
-          {/* Landing Page (/) handles both Landing and Dashboard Redirection */}
+          {/* Landing Page (/) */}
           <Route 
             path="/"
             element={
@@ -124,12 +137,26 @@ function AppContent() {
                     }
                   }}
                 />
-              ) : profile?.role ? (
-                <Navigate to={getRoleDashboard(profile.role)} replace />
               ) : (
-                <Home />
+                  handleRootRedirect() || <Home />
               )
             } 
+          />
+
+          {/* Onboarding Route */}
+          <Route
+             path="/onboarding"
+             element={
+                 isAuthenticated ? (
+                     profile?.onboarding_status === 'completed' ? (
+                         <Navigate to={getRoleDashboard(profile.role)} replace />
+                     ) : (
+                         <OnboardingPage />
+                     )
+                 ) : (
+                     <Navigate to="/" replace />
+                 )
+             }
           />
 
           {/* Protected Routes with RBAC */}

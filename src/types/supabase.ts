@@ -607,7 +607,9 @@ export type Database = {
           interests: string[] | null
           notification_preferences: Json | null
           onboarding_completed: boolean | null
-          onboarding_step: number | null
+          onboarding_completed_at: string | null
+          onboarding_status: string
+          onboarding_step: string | null
           pds_url: string | null
           phone_number: string | null
           preferred_language: string | null
@@ -634,7 +636,9 @@ export type Database = {
           interests?: string[] | null
           notification_preferences?: Json | null
           onboarding_completed?: boolean | null
-          onboarding_step?: number | null
+          onboarding_completed_at?: string | null
+          onboarding_status?: string
+          onboarding_step?: string | null
           pds_url?: string | null
           phone_number?: string | null
           preferred_language?: string | null
@@ -661,7 +665,9 @@ export type Database = {
           interests?: string[] | null
           notification_preferences?: Json | null
           onboarding_completed?: boolean | null
-          onboarding_step?: number | null
+          onboarding_completed_at?: string | null
+          onboarding_status?: string
+          onboarding_step?: string | null
           pds_url?: string | null
           phone_number?: string | null
           preferred_language?: string | null
@@ -675,6 +681,150 @@ export type Database = {
           wallet_address?: string | null
         }
         Relationships: []
+      }
+      user_onboarding: {
+        Row: {
+          allowed_categories: string[] | null
+          blocked_categories: string[] | null
+          created_at: string | null
+          format_preferences: string[] | null
+          frequency_caps: Json | null
+          intent: string | null
+          min_reward_per_category: Json | null
+          payout_threshold: number | null
+          privacy_acknowledged: boolean | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          allowed_categories?: string[] | null
+          blocked_categories?: string[] | null
+          created_at?: string | null
+          format_preferences?: string[] | null
+          frequency_caps?: Json | null
+          intent?: string | null
+          min_reward_per_category?: Json | null
+          payout_threshold?: number | null
+          privacy_acknowledged?: boolean | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          allowed_categories?: string[] | null
+          blocked_categories?: string[] | null
+          created_at?: string | null
+          format_preferences?: string[] | null
+          frequency_caps?: Json | null
+          intent?: string | null
+          min_reward_per_category?: Json | null
+          payout_threshold?: number | null
+          privacy_acknowledged?: boolean | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_onboarding_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      advertiser_onboarding: {
+        Row: {
+          advertiser_id: string
+          company_name: string
+          compliance_confirmed: boolean
+          created_at: string | null
+          first_campaign_created: boolean | null
+          industry: string
+          understands_consent_model: boolean
+          understands_payout_rules: boolean
+          understands_targeting_limits: boolean
+          updated_at: string | null
+        }
+        Insert: {
+          advertiser_id: string
+          company_name: string
+          compliance_confirmed: boolean
+          created_at?: string | null
+          first_campaign_created?: boolean | null
+          industry: string
+          understands_consent_model: boolean
+          understands_payout_rules: boolean
+          understands_targeting_limits: boolean
+          updated_at?: string | null
+        }
+        Update: {
+          advertiser_id?: string
+          company_name?: string
+          compliance_confirmed?: boolean
+          created_at?: string | null
+          first_campaign_created?: boolean | null
+          industry?: string
+          understands_consent_model?: boolean
+          understands_payout_rules?: boolean
+          understands_targeting_limits?: boolean
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "advertiser_onboarding_advertiser_id_fkey"
+            columns: ["advertiser_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      publisher_onboarding: {
+        Row: {
+          ad_density_cap: number | null
+          content_categories: string[] | null
+          created_at: string | null
+          integration_method: string | null
+          platform_type: string
+          publisher_id: string
+          revenue_split: number | null
+          test_ad_served: boolean | null
+          test_events_verified: boolean | null
+          updated_at: string | null
+        }
+        Insert: {
+          ad_density_cap?: number | null
+          content_categories?: string[] | null
+          created_at?: string | null
+          integration_method?: string | null
+          platform_type: string
+          publisher_id: string
+          revenue_split?: number | null
+          test_ad_served?: boolean | null
+          test_events_verified?: boolean | null
+          updated_at?: string | null
+        }
+        Update: {
+          ad_density_cap?: number | null
+          content_categories?: string[] | null
+          created_at?: string | null
+          integration_method?: string | null
+          platform_type?: string
+          publisher_id?: string
+          revenue_split?: number | null
+          test_ad_served?: boolean | null
+          test_events_verified?: boolean | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "publisher_onboarding_publisher_id_fkey"
+            columns: ["publisher_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
       }
       publisher_trust_scores: {
         Row: {
@@ -1228,3 +1378,6 @@ export type UserReward = Tables<'user_rewards'>;
 export type Consent = Tables<'consents'>;
 export type AdCreative = Tables<'ad_creatives'>;
 export type PlatformSetting = Tables<'platform_settings'>;
+export type UserOnboarding = Tables<'user_onboarding'>;
+export type AdvertiserOnboarding = Tables<'advertiser_onboarding'>;
+export type PublisherOnboarding = Tables<'publisher_onboarding'>;
