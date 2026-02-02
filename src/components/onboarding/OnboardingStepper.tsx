@@ -13,8 +13,10 @@ export function OnboardingStepper({ steps, currentStep }: OnboardingStepperProps
            const isCompleted = index < currentStep;
            const isCurrent = index === currentStep;
 
+           // Using div with className="contents" instead of React.Fragment to accept props injected by Tempo
+           // while maintaining the same layout behavior (children act as direct children of the flex parent)
            return (
-             <React.Fragment key={step}>
+             <div key={step} className="contents">
                <div className="flex flex-col items-center relative z-10">
                  <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-colors duration-200
                    ${isCompleted ? 'bg-indigo-600 border-indigo-600' : isCurrent ? 'bg-white border-indigo-600 text-indigo-600' : 'bg-white border-gray-300 text-gray-400'}`}>
@@ -33,7 +35,7 @@ export function OnboardingStepper({ steps, currentStep }: OnboardingStepperProps
                {index < steps.length - 1 && (
                  <div className={`flex-1 h-0.5 mx-2 mb-6 transition-colors duration-200 ${index < currentStep ? 'bg-indigo-600' : 'bg-gray-200'}`} />
                )}
-             </React.Fragment>
+             </div>
            )
         })}
       </div>
