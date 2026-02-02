@@ -39,156 +39,442 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- PROFILES
 -- Admin Access (from ...05)
-CREATE POLICY profiles_admin_select ON public.profiles
-  FOR SELECT USING (
-    auth.jwt() ->> 'role' = 'admin'
-    OR id = auth.uid()
-  );
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'profiles' AND policyname = 'profiles_admin_select'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY profiles_admin_select ON public.profiles
+        FOR SELECT USING (
+          auth.jwt() ->> 'role' = 'admin'
+          OR id = auth.uid()
+        );
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- User Access (Update own)
-CREATE POLICY profiles_user_update ON public.profiles
-  FOR UPDATE USING (id = auth.uid());
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'profiles' AND policyname = 'profiles_user_update'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY profiles_user_update ON public.profiles
+        FOR UPDATE USING (id = auth.uid());
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- NOTE: Public access to profiles is disabled for security (PII protection).
 -- If public profile viewing is required, create a secure view exposing only non-sensitive data.
 
 -- Service Role (Insert for auth trigger)
-CREATE POLICY profiles_service_role_insert ON public.profiles
-  FOR INSERT WITH CHECK (true);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'profiles' AND policyname = 'profiles_service_role_insert'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY profiles_service_role_insert ON public.profiles
+        FOR INSERT WITH CHECK (true);
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- CAMPAIGNS
 -- Admin Access (from ...05)
-CREATE POLICY campaigns_admin_all ON public.campaigns
-  FOR ALL USING (
-    auth.jwt() ->> 'role' = 'admin'
-  );
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'campaigns' AND policyname = 'campaigns_admin_all'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY campaigns_admin_all ON public.campaigns
+        FOR ALL USING (
+          auth.jwt() ->> 'role' = 'admin'
+        );
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- Advertiser Access (Manage own)
-CREATE POLICY campaigns_advertiser_all ON public.campaigns
-  FOR ALL USING (advertiser_id = auth.uid());
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'campaigns' AND policyname = 'campaigns_advertiser_all'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY campaigns_advertiser_all ON public.campaigns
+        FOR ALL USING (advertiser_id = auth.uid());
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- Public Access (View active)
-CREATE POLICY campaigns_public_select_active ON public.campaigns
-  FOR SELECT USING (status = 'active');
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'campaigns' AND policyname = 'campaigns_public_select_active'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY campaigns_public_select_active ON public.campaigns
+        FOR SELECT USING (status = 'active');
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- ADVERTISERS
 -- Admin Access (from ...05)
-CREATE POLICY advertisers_admin_select ON public.advertisers
-  FOR SELECT USING (
-    auth.jwt() ->> 'role' = 'admin'
-  );
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'advertisers' AND policyname = 'advertisers_admin_select'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY advertisers_admin_select ON public.advertisers
+        FOR SELECT USING (
+          auth.jwt() ->> 'role' = 'admin'
+        );
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- Advertiser Access (Manage own)
-CREATE POLICY advertisers_user_all ON public.advertisers
-  FOR ALL USING (user_id = auth.uid());
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'advertisers' AND policyname = 'advertisers_user_all'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY advertisers_user_all ON public.advertisers
+        FOR ALL USING (user_id = auth.uid());
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- PUBLISHERS
 -- Admin Access (Consistency)
-CREATE POLICY publishers_admin_select ON public.publishers
-  FOR SELECT USING (
-    auth.jwt() ->> 'role' = 'admin'
-  );
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'publishers' AND policyname = 'publishers_admin_select'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY publishers_admin_select ON public.publishers
+        FOR SELECT USING (
+          auth.jwt() ->> 'role' = 'admin'
+        );
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- Publisher Access (Manage own)
-CREATE POLICY publishers_user_all ON public.publishers
-  FOR ALL USING (user_id = auth.uid());
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'publishers' AND policyname = 'publishers_user_all'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY publishers_user_all ON public.publishers
+        FOR ALL USING (user_id = auth.uid());
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- NOTE: Public access to publishers is disabled for security (API Key protection).
 -- If public publisher listing is required, create a secure view exposing only non-sensitive data.
 
 -- CONSENTS
 -- User Access (Manage own)
-CREATE POLICY consents_user_all ON public.consents
-  FOR ALL USING (user_id = auth.uid());
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'consents' AND policyname = 'consents_user_all'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY consents_user_all ON public.consents
+        FOR ALL USING (user_id = auth.uid());
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- EVENTS
 -- User Access (View own)
-CREATE POLICY events_user_select ON public.events
-  FOR SELECT USING (user_id = auth.uid());
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'events' AND policyname = 'events_user_select'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY events_user_select ON public.events
+        FOR SELECT USING (user_id = auth.uid());
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- Publisher Access (View derived)
-CREATE POLICY events_publisher_select ON public.events
-  FOR SELECT USING (
-    publisher_id IN (
-      SELECT id FROM public.publishers WHERE user_id = auth.uid()
-    )
-  );
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'events' AND policyname = 'events_publisher_select'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY events_publisher_select ON public.events
+        FOR SELECT USING (
+          publisher_id IN (
+            SELECT id FROM public.publishers WHERE user_id = auth.uid()
+          )
+        );
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- Advertiser Access (View derived)
-CREATE POLICY events_advertiser_select ON public.events
-  FOR SELECT USING (
-    campaign_id IN (
-      SELECT id FROM public.campaigns WHERE advertiser_id = auth.uid()
-    )
-  );
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'events' AND policyname = 'events_advertiser_select'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY events_advertiser_select ON public.events
+        FOR SELECT USING (
+          campaign_id IN (
+            SELECT id FROM public.campaigns WHERE advertiser_id = auth.uid()
+          )
+        );
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- Service Role (Insert)
-CREATE POLICY events_service_role_insert ON public.events
-  FOR INSERT WITH CHECK (true);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'events' AND policyname = 'events_service_role_insert'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY events_service_role_insert ON public.events
+        FOR INSERT WITH CHECK (true);
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- TRANSACTIONS
 -- User Access (View involved)
-CREATE POLICY transactions_user_select ON public.transactions
-  FOR SELECT USING (
-    from_user_id = auth.uid() OR to_user_id = auth.uid()
-  );
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'transactions' AND policyname = 'transactions_user_select'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY transactions_user_select ON public.transactions
+        FOR SELECT USING (
+          from_user_id = auth.uid() OR to_user_id = auth.uid()
+        );
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- USER REWARDS
 -- User Access (View own)
-CREATE POLICY user_rewards_user_select ON public.user_rewards
-  FOR SELECT USING (user_id = auth.uid());
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'user_rewards' AND policyname = 'user_rewards_user_select'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY user_rewards_user_select ON public.user_rewards
+        FOR SELECT USING (user_id = auth.uid());
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- AD CREATIVES
 -- Public Access (View active)
-CREATE POLICY ad_creatives_public_select_active ON public.ad_creatives
-  FOR SELECT USING (is_active = true);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'ad_creatives' AND policyname = 'ad_creatives_public_select_active'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY ad_creatives_public_select_active ON public.ad_creatives
+        FOR SELECT USING (is_active = true);
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- Advertiser Access (Manage derived)
-CREATE POLICY ad_creatives_advertiser_all ON public.ad_creatives
-  FOR ALL USING (
-    campaign_id IN (
-      SELECT id FROM public.campaigns WHERE advertiser_id = auth.uid()
-    )
-  );
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'ad_creatives' AND policyname = 'ad_creatives_advertiser_all'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY ad_creatives_advertiser_all ON public.ad_creatives
+        FOR ALL USING (
+          campaign_id IN (
+            SELECT id FROM public.campaigns WHERE advertiser_id = auth.uid()
+          )
+        );
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- PLATFORM SETTINGS
 -- Admin Access (from ...05)
-CREATE POLICY platform_settings_admin_all ON public.platform_settings
-  FOR ALL USING (
-    auth.jwt() ->> 'role' = 'admin'
-  );
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'platform_settings' AND policyname = 'platform_settings_admin_all'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY platform_settings_admin_all ON public.platform_settings
+        FOR ALL USING (
+          auth.jwt() ->> 'role' = 'admin'
+        );
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- Public Access (View all)
-CREATE POLICY platform_settings_public_select ON public.platform_settings
-  FOR SELECT USING (true);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'platform_settings' AND policyname = 'platform_settings_public_select'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY platform_settings_public_select ON public.platform_settings
+        FOR SELECT USING (true);
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- CONSENT AUDIT LOG
 -- Admin Access (from ...05)
-CREATE POLICY consent_audit_log_admin_select ON public.consent_audit_log
-  FOR SELECT USING (
-    auth.jwt() ->> 'role' = 'admin'
-  );
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'consent_audit_log' AND policyname = 'consent_audit_log_admin_select'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY consent_audit_log_admin_select ON public.consent_audit_log
+        FOR SELECT USING (
+          auth.jwt() ->> 'role' = 'admin'
+        );
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- PUBLISHER TRUST SCORES
 -- Admin Access (from ...05)
-CREATE POLICY publisher_trust_scores_admin_select ON public.publisher_trust_scores
-  FOR SELECT USING (
-    auth.jwt() ->> 'role' = 'admin'
-  );
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'publisher_trust_scores' AND policyname = 'publisher_trust_scores_admin_select'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY publisher_trust_scores_admin_select ON public.publisher_trust_scores
+        FOR SELECT USING (
+          auth.jwt() ->> 'role' = 'admin'
+        );
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- EMERGENCY CONTROLS
 -- Admin Access (from ...05)
-CREATE POLICY emergency_controls_admin_all ON public.emergency_controls
-  FOR ALL USING (
-    auth.jwt() ->> 'role' = 'admin'
-  );
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'emergency_controls' AND policyname = 'emergency_controls_admin_all'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY emergency_controls_admin_all ON public.emergency_controls
+        FOR ALL USING (
+          auth.jwt() ->> 'role' = 'admin'
+        );
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- FRAUD SESSIONS
 -- Service Role Only
-CREATE POLICY fraud_sessions_service_role ON public.fraud_sessions
-  FOR ALL USING (auth.role() = 'service_role');
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'fraud_sessions' AND policyname = 'fraud_sessions_service_role'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY fraud_sessions_service_role ON public.fraud_sessions
+        FOR ALL USING (auth.role() = 'service_role');
+    $sql$;
+  END IF;
+END;
+$$;
 
 -- BLOCKED ENTITIES
 -- Service Role Only
-CREATE POLICY blocked_entities_service_role ON public.blocked_entities
-  FOR ALL USING (auth.role() = 'service_role');
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'blocked_entities' AND policyname = 'blocked_entities_service_role'
+  ) THEN
+    EXECUTE $sql$
+      CREATE POLICY blocked_entities_service_role ON public.blocked_entities
+        FOR ALL USING (auth.role() = 'service_role');
+    $sql$;
+  END IF;
+END;
+$$;
