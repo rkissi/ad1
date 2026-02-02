@@ -1,10 +1,14 @@
--- Metaverse Advertising Platform Database Schema
--- Supabase Migration
+-- Metaverse Advertising Platform - Unified Schema
+-- Single Source of Truth for Database Structure
+
+-- ==========================================
+-- 1. EXTENSIONS & TYPES
+-- ==========================================
 
 -- Enable required extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Create enum types for better type safety (idempotent)
+-- Create enum types
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
@@ -29,8 +33,7 @@ BEGIN
 END
 $$;
 
--- (Optional) ensure enum contains labels - requires Postgres 14+ for IF NOT EXISTS on ADD VALUE
--- Remove these ALTER TYPE lines if your server is older than 14
+-- Ensure enum values exist (Idempotency)
 ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'user';
 ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'advertiser';
 ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'publisher';
@@ -58,6 +61,10 @@ ALTER TYPE verification_status ADD VALUE IF NOT EXISTS 'pending';
 ALTER TYPE verification_status ADD VALUE IF NOT EXISTS 'verified';
 ALTER TYPE verification_status ADD VALUE IF NOT EXISTS 'rejected';
 
+-- ==========================================
+-- 2. TABLES
+-- ==========================================
+
 -- Profiles table (extends Supabase auth.users)
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -73,6 +80,40 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   token_balance DECIMAL(18,6) DEFAULT 0,
   avatar_url TEXT,
   bio TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Advertisers table
+CREATE TABLE IF NOT EXISTS public.advertisers (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID UNIQUE REFERENCES public.profiles(id) ON DELETE CASCADE,
+  company_name VARCHAR(255),
+  industry VARCHAR(100),
+  website VARCHAR(500),
+  verification_status verification_status DEFAULT 'pending',
+  billing_info JSONB DEFAULT '{}',
+  total_spent DECIMAL(18,6) DEFAULT 0,
+  active_campaigns INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Publishers table
+CREATE TABLE IF NOT EXISTS public.publishers (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID UNIQUE REFERENCES public.profiles(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  domain VARCHAR(255),
+  description TEXT,
+  categories TEXT[] DEFAULT '{}',
+  ad_slots JSONB DEFAULT '[]',
+  payout_preferences JSONB DEFAULT '{}',
+  total_impressions INTEGER DEFAULT 0,
+  total_clicks INTEGER DEFAULT 0,
+  total_earnings DECIMAL(18,6) DEFAULT 0,
+  status VARCHAR(20) DEFAULT 'active',
+  api_key VARCHAR(64) UNIQUE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -98,40 +139,6 @@ CREATE TABLE IF NOT EXISTS public.campaigns (
   conversions INTEGER DEFAULT 0,
   ctr DECIMAL(5,4) DEFAULT 0,
   blockchain_tx_hash VARCHAR(66),
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Publishers table
-CREATE TABLE IF NOT EXISTS public.publishers (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID UNIQUE REFERENCES public.profiles(id) ON DELETE CASCADE,
-  name VARCHAR(255) NOT NULL,
-  domain VARCHAR(255),
-  description TEXT,
-  categories TEXT[] DEFAULT '{}',
-  ad_slots JSONB DEFAULT '[]',
-  payout_preferences JSONB DEFAULT '{}',
-  total_impressions INTEGER DEFAULT 0,
-  total_clicks INTEGER DEFAULT 0,
-  total_earnings DECIMAL(18,6) DEFAULT 0,
-  status VARCHAR(20) DEFAULT 'active',
-  api_key VARCHAR(64) UNIQUE,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Advertisers table
-CREATE TABLE IF NOT EXISTS public.advertisers (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID UNIQUE REFERENCES public.profiles(id) ON DELETE CASCADE,
-  company_name VARCHAR(255),
-  industry VARCHAR(100),
-  website VARCHAR(500),
-  verification_status verification_status DEFAULT 'pending',
-  billing_info JSONB DEFAULT '{}',
-  total_spent DECIMAL(18,6) DEFAULT 0,
-  active_campaigns INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -224,7 +231,69 @@ CREATE TABLE IF NOT EXISTS public.platform_settings (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Create indexes for performance
+-- Fraud sessions table (from fraud_prevention)
+CREATE TABLE IF NOT EXISTS public.fraud_sessions (
+  session_id VARCHAR(255) PRIMARY KEY,
+  user_id UUID REFERENCES public.profiles(id),
+  click_count INTEGER DEFAULT 0,
+  impression_count INTEGER DEFAULT 0,
+  last_event_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Blocked entities table (from fraud_prevention)
+CREATE TABLE IF NOT EXISTS public.blocked_entities (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  type VARCHAR(20) NOT NULL, -- 'ip', 'user', 'publisher', 'device'
+  value VARCHAR(255) NOT NULL,
+  reason TEXT,
+  blocked_until TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Consent Audit Log (Reconstructed)
+CREATE TABLE IF NOT EXISTS public.consent_audit_log (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES public.profiles(id),
+  consent_id UUID,
+  action VARCHAR(255) NOT NULL,
+  scope VARCHAR(255),
+  ip_address VARCHAR(45),
+  metadata JSONB DEFAULT '{}',
+  request_id VARCHAR(255),
+  timestamp TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Publisher Trust Scores (Reconstructed)
+CREATE TABLE IF NOT EXISTS public.publisher_trust_scores (
+  publisher_id UUID PRIMARY KEY REFERENCES public.publishers(id),
+  trust_score DECIMAL(5,2) DEFAULT 0,
+  total_events INTEGER DEFAULT 0,
+  suspicious_events INTEGER DEFAULT 0,
+  flags JSONB DEFAULT '{}',
+  status VARCHAR(50),
+  last_fraud_check TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Emergency Controls (Reconstructed)
+CREATE TABLE IF NOT EXISTS public.emergency_controls (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  entity_type VARCHAR(50) NOT NULL,
+  entity_id VARCHAR(255),
+  action VARCHAR(50) NOT NULL,
+  reason TEXT NOT NULL,
+  triggered_by UUID REFERENCES public.profiles(id),
+  triggered_at TIMESTAMPTZ DEFAULT NOW(),
+  expires_at TIMESTAMPTZ,
+  is_active BOOLEAN DEFAULT true,
+  metadata JSONB DEFAULT '{}'
+);
+
+-- ==========================================
+-- 3. INDEXES
+-- ==========================================
+
 CREATE INDEX IF NOT EXISTS idx_profiles_role ON public.profiles(role);
 CREATE INDEX IF NOT EXISTS idx_profiles_email ON public.profiles(email);
 CREATE INDEX IF NOT EXISTS idx_campaigns_advertiser ON public.campaigns(advertiser_id);
@@ -243,318 +312,57 @@ CREATE INDEX IF NOT EXISTS idx_user_rewards_user ON public.user_rewards(user_id)
 CREATE INDEX IF NOT EXISTS idx_publishers_user ON public.publishers(user_id);
 CREATE INDEX IF NOT EXISTS idx_advertisers_user ON public.advertisers(user_id);
 
--- Enable Row Level Security
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.campaigns ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.publishers ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.advertisers ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.consents ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.user_rewards ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.ad_creatives ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.platform_settings ENABLE ROW LEVEL SECURITY;
+-- Indexes for new tables
+CREATE INDEX IF NOT EXISTS idx_consent_audit_user ON public.consent_audit_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_emergency_controls_active ON public.emergency_controls(is_active);
 
--- Create RLS policies idempotently using DO blocks (CREATE POLICY has no IF NOT EXISTS)
--- Profiles policies
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'users_can_view_their_own_profile' AND n.nspname = 'public' AND c.relname = 'profiles'
-  ) THEN
-    CREATE POLICY users_can_view_their_own_profile ON public.profiles
-      FOR SELECT USING (auth.uid() = id);
-  END IF;
+-- ==========================================
+-- 4. FUNCTIONS & TRIGGERS
+-- ==========================================
 
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'users_can_update_their_own_profile' AND n.nspname = 'public' AND c.relname = 'profiles'
-  ) THEN
-    CREATE POLICY users_can_update_their_own_profile ON public.profiles
-      FOR UPDATE USING (auth.uid() = id);
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'admins_can_view_all_profiles' AND n.nspname = 'public' AND c.relname = 'profiles'
-  ) THEN
-    CREATE POLICY admins_can_view_all_profiles ON public.profiles
-      FOR SELECT USING (
-        EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-      );
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'public_profiles_are_viewable' AND n.nspname = 'public' AND c.relname = 'profiles'
-  ) THEN
-    CREATE POLICY public_profiles_are_viewable ON public.profiles
-      FOR SELECT USING (true);
-  END IF;
-END
-$$;
-
--- Campaigns policies
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'anyone_can_view_active_campaigns' AND n.nspname = 'public' AND c.relname = 'campaigns'
-  ) THEN
-    CREATE POLICY anyone_can_view_active_campaigns ON public.campaigns
-      FOR SELECT USING (status = 'active');
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'advertisers_manage_their_campaigns' AND n.nspname = 'public' AND c.relname = 'campaigns'
-  ) THEN
-    CREATE POLICY advertisers_manage_their_campaigns ON public.campaigns
-      FOR ALL USING (advertiser_id = auth.uid());
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'admins_manage_all_campaigns' AND n.nspname = 'public' AND c.relname = 'campaigns'
-  ) THEN
-    CREATE POLICY admins_manage_all_campaigns ON public.campaigns
-      FOR ALL USING (
-        EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-      );
-  END IF;
-END
-$$;
-
--- Publishers policies
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'publishers_manage_their_own_data' AND n.nspname = 'public' AND c.relname = 'publishers'
-  ) THEN
-    CREATE POLICY publishers_manage_their_own_data ON public.publishers
-      FOR ALL USING (user_id = auth.uid());
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'anyone_view_active_publishers' AND n.nspname = 'public' AND c.relname = 'publishers'
-  ) THEN
-    CREATE POLICY anyone_view_active_publishers ON public.publishers
-      FOR SELECT USING (status = 'active');
-  END IF;
-END
-$$;
-
--- Advertisers policies
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'advertisers_manage_their_own_data' AND n.nspname = 'public' AND c.relname = 'advertisers'
-  ) THEN
-    CREATE POLICY advertisers_manage_their_own_data ON public.advertisers
-      FOR ALL USING (user_id = auth.uid());
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'admins_view_all_advertisers' AND n.nspname = 'public' AND c.relname = 'advertisers'
-  ) THEN
-    CREATE POLICY admins_view_all_advertisers ON public.advertisers
-      FOR SELECT USING (
-        EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-      );
-  END IF;
-END
-$$;
-
--- Consents policies
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'users_manage_their_own_consents' AND n.nspname = 'public' AND c.relname = 'consents'
-  ) THEN
-    CREATE POLICY users_manage_their_own_consents ON public.consents
-      FOR ALL USING (user_id = auth.uid());
-  END IF;
-END
-$$;
-
--- Events policies
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'users_view_their_own_events' AND n.nspname = 'public' AND c.relname = 'events'
-  ) THEN
-    CREATE POLICY users_view_their_own_events ON public.events
-      FOR SELECT USING (user_id = auth.uid());
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'publishers_view_their_events' AND n.nspname = 'public' AND c.relname = 'events'
-  ) THEN
-    CREATE POLICY publishers_view_their_events ON public.events
-      FOR SELECT USING (publisher_id IN (SELECT id FROM public.publishers WHERE user_id = auth.uid()));
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'advertisers_view_campaign_events' AND n.nspname = 'public' AND c.relname = 'events'
-  ) THEN
-    CREATE POLICY advertisers_view_campaign_events ON public.events
-      FOR SELECT USING (campaign_id IN (SELECT id FROM public.campaigns WHERE advertiser_id = auth.uid()));
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'service_role_insert_events' AND n.nspname = 'public' AND c.relname = 'events'
-  ) THEN
-    CREATE POLICY service_role_insert_events ON public.events
-      FOR INSERT WITH CHECK (true);
-  END IF;
-END
-$$;
-
--- Transactions policies
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'users_view_their_transactions' AND n.nspname = 'public' AND c.relname = 'transactions'
-  ) THEN
-    CREATE POLICY users_view_their_transactions ON public.transactions
-      FOR SELECT USING (from_user_id = auth.uid() OR to_user_id = auth.uid());
-  END IF;
-END
-$$;
-
--- User rewards policies
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'users_view_their_rewards' AND n.nspname = 'public' AND c.relname = 'user_rewards'
-  ) THEN
-    CREATE POLICY users_view_their_rewards ON public.user_rewards
-      FOR SELECT USING (user_id = auth.uid());
-  END IF;
-END
-$$;
-
--- Ad creatives policies
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'anyone_view_active_creatives' AND n.nspname = 'public' AND c.relname = 'ad_creatives'
-  ) THEN
-    CREATE POLICY anyone_view_active_creatives ON public.ad_creatives
-      FOR SELECT USING (is_active = true);
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'advertisers_manage_their_creatives' AND n.nspname = 'public' AND c.relname = 'ad_creatives'
-  ) THEN
-    CREATE POLICY advertisers_manage_their_creatives ON public.ad_creatives
-      FOR ALL USING (
-        campaign_id IN (SELECT id FROM public.campaigns WHERE advertiser_id = auth.uid())
-      );
-  END IF;
-END
-$$;
-
--- Platform settings policies
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'admins_manage_settings' AND n.nspname = 'public' AND c.relname = 'platform_settings'
-  ) THEN
-    CREATE POLICY admins_manage_settings ON public.platform_settings
-      FOR ALL USING (
-        EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
-      );
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policy p
-    JOIN pg_class c ON p.polrelid = c.oid
-    JOIN pg_namespace n ON c.relnamespace = n.oid
-    WHERE p.polname = 'anyone_view_settings' AND n.nspname = 'public' AND c.relname = 'platform_settings'
-  ) THEN
-    CREATE POLICY anyone_view_settings ON public.platform_settings
-      FOR SELECT USING (true);
-  END IF;
-END
-$$;
-
--- Function to handle new user registration
+-- Function to handle new user registration (Robust Version)
 CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  resolved_role public.user_role := 'user';
 BEGIN
-  INSERT INTO public.profiles (id, email, display_name, did, role)
-  VALUES (
+  -- Safely resolve role from metadata
+  IF NEW.raw_user_meta_data ? 'role' THEN
+    BEGIN
+      resolved_role := (NEW.raw_user_meta_data->>'role')::public.user_role;
+    EXCEPTION WHEN OTHERS THEN
+      resolved_role := 'user';
+    END;
+  END IF;
+
+  INSERT INTO public.profiles (
+    id,
+    email,
+    display_name,
+    did,
+    role
+  ) VALUES (
     NEW.id,
     NEW.email,
-    COALESCE(NEW.raw_user_meta_data->>'display_name', split_part(NEW.email, '@', 1)),
+    COALESCE(
+      NEW.raw_user_meta_data->>'display_name',
+      split_part(NEW.email, '@', 1)
+    ),
     'did:metaverse:' || NEW.id::text,
-    COALESCE((NEW.raw_user_meta_data->>'role')::user_role, 'user')
+    resolved_role
   )
   ON CONFLICT (id) DO UPDATE SET
     display_name = EXCLUDED.display_name,
     role = EXCLUDED.role,
     updated_at = NOW();
+
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 -- Trigger for new user registration
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
@@ -571,7 +379,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Apply updated_at triggers (drop first to be idempotent)
+-- Apply updated_at triggers
 DROP TRIGGER IF EXISTS update_profiles_updated_at ON public.profiles;
 CREATE TRIGGER update_profiles_updated_at BEFORE UPDATE ON public.profiles
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
@@ -590,6 +398,10 @@ CREATE TRIGGER update_advertisers_updated_at BEFORE UPDATE ON public.advertisers
 
 DROP TRIGGER IF EXISTS update_transactions_updated_at ON public.transactions;
 CREATE TRIGGER update_transactions_updated_at BEFORE UPDATE ON public.transactions
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_publisher_trust_scores_updated_at ON public.publisher_trust_scores;
+CREATE TRIGGER update_publisher_trust_scores_updated_at BEFORE UPDATE ON public.publisher_trust_scores
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 -- Function to update campaign metrics
@@ -636,7 +448,19 @@ CREATE TRIGGER update_publisher_metrics_trigger
   AFTER INSERT ON public.events
   FOR EACH ROW EXECUTE FUNCTION public.update_publisher_metrics();
 
--- Insert default platform settings
+-- Function to cleanup old fraud sessions
+CREATE OR REPLACE FUNCTION public.cleanup_old_fraud_sessions()
+RETURNS void AS $$
+BEGIN
+  DELETE FROM public.fraud_sessions
+  WHERE last_event_at < NOW() - INTERVAL '24 hours';
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ==========================================
+-- 5. SEED DATA
+-- ==========================================
+
 INSERT INTO public.platform_settings (key, value, description) VALUES
   ('platform_fee_percentage', '{"value": 10}', 'Platform fee percentage on transactions'),
   ('min_campaign_budget', '{"value": 100}', 'Minimum campaign budget in USD'),
