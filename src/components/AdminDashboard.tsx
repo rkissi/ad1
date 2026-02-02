@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuthSafe, analyticsAPI } from '@/lib/auth-context';
+import { Navbar } from '@/components/ui/navbar';
 
 interface AdminStats {
   totalUsers: number;
@@ -50,7 +51,7 @@ interface Transaction {
 }
 
 export default function AdminDashboard() {
-  const { user } = useAuthSafe();
+  const { user, logout } = useAuthSafe();
   const [stats, setStats] = useState<AdminStats>({
     totalUsers: 0,
     totalCampaigns: 0,
@@ -186,7 +187,21 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-gray-50">
+      {/* Navbar */}
+      <Navbar 
+        title="Admin Dashboard"
+        user={{
+          name: user?.displayName || 'Admin',
+          email: user?.email || 'admin@example.com',
+          role: 'admin',
+        }}
+        onLogout={logout}
+        showSearch={true}
+        notifications={stats.fraudAlerts}
+      />
+      
+      <div className="p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-8">
@@ -548,6 +563,7 @@ export default function AdminDashboard() {
             </Card>
           </TabsContent>
         </Tabs>
+      </div>
       </div>
     </div>
   );

@@ -62,7 +62,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .single();
 
       if (error) {
-        console.error('Error fetching profile:', error);
+        // Check for RLS-related errors and handle gracefully
+        if (error.code === '42P17') {
+          console.error('RLS policy error - please check database policies:', error);
+        } else if (error.code === 'PGRST116') {
+          // No rows returned - profile doesn't exist yet
+          console.log('Profile not found for user:', userId);
+        } else {
+          console.error('Error fetching profile:', error);
+        }
         return null;
       }
 
@@ -191,17 +199,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (data.user && data.session) {
         setSession(data.session);
-        const userProfile = await fetchProfile(data.user.id);
+        
+        // Try to fetch profile with retries
+        let userProfile = null;
+        let attempts = 0;
+        const maxAttempts = 5;
+        
+        while (!userProfile && attempts < maxAttempts) {
+          attempts++;
+          userProfile = await fetchProfile(data.user.id);
+          if (!userProfile && attempts < maxAttempts) {
+            console.log(`Profile fetch attempt ${attempts} failed, retrying...`);
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        }
 
         if (userProfile) {
           setProfile(userProfile);
           setUser(profileToUser(userProfile));
           console.log('✅ Login successful:', email);
         } else {
-          // In production, we might want to handle missing profiles differently,
-          // e.g., redirect to a profile completion page.
-          console.error('User profile not found after login');
-          throw new Error('User profile not found. Please contact support.');
+          // Profile doesn't exist - this might happen for users created before profile trigger
+          // Attempt to create profile from auth metadata
+          console.warn('Profile not found, attempting to create from auth metadata...');
+          
+          const userMetadata = data.user.user_metadata || {};
+          const { data: newProfile, error: createError } = await supabase
+            .from('profiles')
+            .upsert({
+              id: data.user.id,
+              email: data.user.email || email,
+              display_name: userMetadata.display_name || email.split('@')[0],
+              role: userMetadata.role || 'user',
+              did: `did:metaverse:${data.user.id}`
+            })
+            .select()
+            .single();
+
+          if (createError) {
+            console.error('Failed to create profile:', createError);
+            throw new Error('Unable to load or create user profile. Please try again or contact support.');
+          }
+
+          setProfile(newProfile);
+          setUser(profileToUser(newProfile));
+          console.log('✅ Login successful (profile created):', email);
         }
       }
     } catch (error: any) {

@@ -71,10 +71,18 @@ export type Database = {
         Row: {
           active_campaigns: number | null
           billing_info: Json | null
+          campaign_objectives: string[] | null
           company_name: string | null
+          company_size: string | null
+          contact_email: string | null
+          contact_name: string | null
+          contact_phone: string | null
           created_at: string | null
           id: string
           industry: string | null
+          marketing_budget_range: string | null
+          onboarding_completed: boolean | null
+          target_markets: string[] | null
           total_spent: number | null
           updated_at: string | null
           user_id: string | null
@@ -86,10 +94,18 @@ export type Database = {
         Insert: {
           active_campaigns?: number | null
           billing_info?: Json | null
+          campaign_objectives?: string[] | null
           company_name?: string | null
+          company_size?: string | null
+          contact_email?: string | null
+          contact_name?: string | null
+          contact_phone?: string | null
           created_at?: string | null
           id?: string
           industry?: string | null
+          marketing_budget_range?: string | null
+          onboarding_completed?: boolean | null
+          target_markets?: string[] | null
           total_spent?: number | null
           updated_at?: string | null
           user_id?: string | null
@@ -101,10 +117,18 @@ export type Database = {
         Update: {
           active_campaigns?: number | null
           billing_info?: Json | null
+          campaign_objectives?: string[] | null
           company_name?: string | null
+          company_size?: string | null
+          contact_email?: string | null
+          contact_name?: string | null
+          contact_phone?: string | null
           created_at?: string | null
           id?: string
           industry?: string | null
+          marketing_budget_range?: string | null
+          onboarding_completed?: boolean | null
+          target_markets?: string[] | null
           total_spent?: number | null
           updated_at?: string | null
           user_id?: string | null
@@ -122,6 +146,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      blocked_entities: {
+        Row: {
+          blocked_until: string | null
+          created_at: string | null
+          id: string
+          reason: string | null
+          type: string
+          value: string
+        }
+        Insert: {
+          blocked_until?: string | null
+          created_at?: string | null
+          id?: string
+          reason?: string | null
+          type: string
+          value: string
+        }
+        Update: {
+          blocked_until?: string | null
+          created_at?: string | null
+          id?: string
+          reason?: string | null
+          type?: string
+          value?: string
+        }
+        Relationships: []
       }
       campaigns: {
         Row: {
@@ -203,6 +254,50 @@ export type Database = {
           },
         ]
       }
+      consent_audit_log: {
+        Row: {
+          action: string
+          consent_id: string | null
+          id: string
+          ip_address: string | null
+          metadata: Json | null
+          request_id: string | null
+          scope: string | null
+          timestamp: string | null
+          user_id: string | null
+        }
+        Insert: {
+          action: string
+          consent_id?: string | null
+          id?: string
+          ip_address?: string | null
+          metadata?: Json | null
+          request_id?: string | null
+          scope?: string | null
+          timestamp?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          action?: string
+          consent_id?: string | null
+          id?: string
+          ip_address?: string | null
+          metadata?: Json | null
+          request_id?: string | null
+          scope?: string | null
+          timestamp?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "consent_audit_log_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       consents: {
         Row: {
           blockchain_tx_hash: string | null
@@ -211,10 +306,12 @@ export type Database = {
           id: string
           ipfs_hash: string | null
           is_active: boolean | null
+          metadata: Json | null
           revoked_at: string | null
           scope: string
           signature: string | null
           user_id: string | null
+          version: string | null
         }
         Insert: {
           blockchain_tx_hash?: string | null
@@ -223,10 +320,12 @@ export type Database = {
           id?: string
           ipfs_hash?: string | null
           is_active?: boolean | null
+          metadata?: Json | null
           revoked_at?: string | null
           scope: string
           signature?: string | null
           user_id?: string | null
+          version?: string | null
         }
         Update: {
           blockchain_tx_hash?: string | null
@@ -235,10 +334,12 @@ export type Database = {
           id?: string
           ipfs_hash?: string | null
           is_active?: boolean | null
+          metadata?: Json | null
           revoked_at?: string | null
           scope?: string
           signature?: string | null
           user_id?: string | null
+          version?: string | null
         }
         Relationships: [
           {
@@ -251,6 +352,53 @@ export type Database = {
           {
             foreignKeyName: "consents_user_id_fkey"
             columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      emergency_controls: {
+        Row: {
+          action: string
+          entity_id: string | null
+          entity_type: string
+          expires_at: string | null
+          id: string
+          is_active: boolean | null
+          metadata: Json | null
+          reason: string
+          triggered_at: string | null
+          triggered_by: string | null
+        }
+        Insert: {
+          action: string
+          entity_id?: string | null
+          entity_type: string
+          expires_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          metadata?: Json | null
+          reason: string
+          triggered_at?: string | null
+          triggered_by?: string | null
+        }
+        Update: {
+          action?: string
+          entity_id?: string | null
+          entity_type?: string
+          expires_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          metadata?: Json | null
+          reason?: string
+          triggered_at?: string | null
+          triggered_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "emergency_controls_triggered_by_fkey"
+            columns: ["triggered_by"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -327,6 +475,88 @@ export type Database = {
           },
         ]
       }
+      fraud_sessions: {
+        Row: {
+          click_count: number | null
+          created_at: string | null
+          impression_count: number | null
+          last_event_at: string | null
+          session_id: string
+          user_id: string | null
+        }
+        Insert: {
+          click_count?: number | null
+          created_at?: string | null
+          impression_count?: number | null
+          last_event_at?: string | null
+          session_id: string
+          user_id?: string | null
+        }
+        Update: {
+          click_count?: number | null
+          created_at?: string | null
+          impression_count?: number | null
+          last_event_at?: string | null
+          session_id?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fraud_sessions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payout_reconciliation: {
+        Row: {
+          actual_amount: number | null
+          blockchain_tx_hash: string | null
+          created_at: string | null
+          discrepancy: number | null
+          expected_amount: number
+          id: string
+          notes: string | null
+          reconciled: boolean | null
+          reconciled_at: string | null
+          transaction_id: string | null
+        }
+        Insert: {
+          actual_amount?: number | null
+          blockchain_tx_hash?: string | null
+          created_at?: string | null
+          discrepancy?: number | null
+          expected_amount: number
+          id?: string
+          notes?: string | null
+          reconciled?: boolean | null
+          reconciled_at?: string | null
+          transaction_id?: string | null
+        }
+        Update: {
+          actual_amount?: number | null
+          blockchain_tx_hash?: string | null
+          created_at?: string | null
+          discrepancy?: number | null
+          expected_amount?: number
+          id?: string
+          notes?: string | null
+          reconciled?: boolean | null
+          reconciled_at?: string | null
+          transaction_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payout_reconciliation_transaction_id_fkey"
+            columns: ["transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       platform_settings: {
         Row: {
           description: string | null
@@ -366,16 +596,26 @@ export type Database = {
         Row: {
           avatar_url: string | null
           bio: string | null
+          company_name: string | null
           consents: Json | null
+          country: string | null
           created_at: string | null
           did: string | null
           display_name: string | null
           email: string
           id: string
           interests: string[] | null
+          notification_preferences: Json | null
+          onboarding_completed: boolean | null
+          onboarding_step: number | null
           pds_url: string | null
+          phone_number: string | null
+          preferred_language: string | null
+          privacy_accepted_at: string | null
           reward_preferences: Json | null
           role: Database["public"]["Enums"]["user_role"] | null
+          terms_accepted_at: string | null
+          timezone: string | null
           token_balance: number | null
           updated_at: string | null
           wallet_address: string | null
@@ -383,16 +623,26 @@ export type Database = {
         Insert: {
           avatar_url?: string | null
           bio?: string | null
+          company_name?: string | null
           consents?: Json | null
+          country?: string | null
           created_at?: string | null
           did?: string | null
           display_name?: string | null
           email: string
           id: string
           interests?: string[] | null
+          notification_preferences?: Json | null
+          onboarding_completed?: boolean | null
+          onboarding_step?: number | null
           pds_url?: string | null
+          phone_number?: string | null
+          preferred_language?: string | null
+          privacy_accepted_at?: string | null
           reward_preferences?: Json | null
           role?: Database["public"]["Enums"]["user_role"] | null
+          terms_accepted_at?: string | null
+          timezone?: string | null
           token_balance?: number | null
           updated_at?: string | null
           wallet_address?: string | null
@@ -400,34 +650,94 @@ export type Database = {
         Update: {
           avatar_url?: string | null
           bio?: string | null
+          company_name?: string | null
           consents?: Json | null
+          country?: string | null
           created_at?: string | null
           did?: string | null
           display_name?: string | null
           email?: string
           id?: string
           interests?: string[] | null
+          notification_preferences?: Json | null
+          onboarding_completed?: boolean | null
+          onboarding_step?: number | null
           pds_url?: string | null
+          phone_number?: string | null
+          preferred_language?: string | null
+          privacy_accepted_at?: string | null
           reward_preferences?: Json | null
           role?: Database["public"]["Enums"]["user_role"] | null
+          terms_accepted_at?: string | null
+          timezone?: string | null
           token_balance?: number | null
           updated_at?: string | null
           wallet_address?: string | null
         }
         Relationships: []
       }
+      publisher_trust_scores: {
+        Row: {
+          flags: Json | null
+          last_fraud_check: string | null
+          publisher_id: string
+          status: string | null
+          suspicious_events: number | null
+          total_events: number | null
+          trust_score: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          flags?: Json | null
+          last_fraud_check?: string | null
+          publisher_id: string
+          status?: string | null
+          suspicious_events?: number | null
+          total_events?: number | null
+          trust_score?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          flags?: Json | null
+          last_fraud_check?: string | null
+          publisher_id?: string
+          status?: string | null
+          suspicious_events?: number | null
+          total_events?: number | null
+          trust_score?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "publisher_trust_scores_publisher_id_fkey"
+            columns: ["publisher_id"]
+            isOneToOne: true
+            referencedRelation: "publishers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       publishers: {
         Row: {
           ad_slots: Json | null
           api_key: string | null
           categories: string[] | null
+          contact_email: string | null
+          contact_name: string | null
+          contact_phone: string | null
+          content_type: string | null
           created_at: string | null
           description: string | null
           domain: string | null
           id: string
+          integration_type: string | null
+          monetization_goals: string | null
+          monthly_traffic: string | null
           name: string
+          onboarding_completed: boolean | null
           payout_preferences: Json | null
           status: string | null
+          target_audience: string | null
           total_clicks: number | null
           total_earnings: number | null
           total_impressions: number | null
@@ -438,13 +748,22 @@ export type Database = {
           ad_slots?: Json | null
           api_key?: string | null
           categories?: string[] | null
+          contact_email?: string | null
+          contact_name?: string | null
+          contact_phone?: string | null
+          content_type?: string | null
           created_at?: string | null
           description?: string | null
           domain?: string | null
           id?: string
+          integration_type?: string | null
+          monetization_goals?: string | null
+          monthly_traffic?: string | null
           name: string
+          onboarding_completed?: boolean | null
           payout_preferences?: Json | null
           status?: string | null
+          target_audience?: string | null
           total_clicks?: number | null
           total_earnings?: number | null
           total_impressions?: number | null
@@ -455,13 +774,22 @@ export type Database = {
           ad_slots?: Json | null
           api_key?: string | null
           categories?: string[] | null
+          contact_email?: string | null
+          contact_name?: string | null
+          contact_phone?: string | null
+          content_type?: string | null
           created_at?: string | null
           description?: string | null
           domain?: string | null
           id?: string
+          integration_type?: string | null
+          monetization_goals?: string | null
+          monthly_traffic?: string | null
           name?: string
+          onboarding_completed?: boolean | null
           payout_preferences?: Json | null
           status?: string | null
+          target_audience?: string | null
           total_clicks?: number | null
           total_earnings?: number | null
           total_impressions?: number | null
@@ -477,6 +805,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      rate_limit_tracking: {
+        Row: {
+          created_at: string | null
+          entity_id: string
+          entity_type: string
+          event_count: number | null
+          event_type: string
+          id: string
+          window_end: string
+          window_start: string
+        }
+        Insert: {
+          created_at?: string | null
+          entity_id: string
+          entity_type: string
+          event_count?: number | null
+          event_type: string
+          id?: string
+          window_end: string
+          window_start: string
+        }
+        Update: {
+          created_at?: string | null
+          entity_id?: string
+          entity_type?: string
+          event_count?: number | null
+          event_type?: string
+          id?: string
+          window_end?: string
+          window_start?: string
+        }
+        Relationships: []
       }
       transactions: {
         Row: {
@@ -548,6 +909,59 @@ export type Database = {
           },
         ]
       }
+      user_onboarding_progress: {
+        Row: {
+          completed_at: string | null
+          consent_completed: boolean | null
+          current_step: number | null
+          id: string
+          last_activity_at: string | null
+          metadata: Json | null
+          preferences_completed: boolean | null
+          profile_completed: boolean | null
+          role_setup_completed: boolean | null
+          started_at: string | null
+          steps_completed: Json | null
+          user_id: string | null
+        }
+        Insert: {
+          completed_at?: string | null
+          consent_completed?: boolean | null
+          current_step?: number | null
+          id?: string
+          last_activity_at?: string | null
+          metadata?: Json | null
+          preferences_completed?: boolean | null
+          profile_completed?: boolean | null
+          role_setup_completed?: boolean | null
+          started_at?: string | null
+          steps_completed?: Json | null
+          user_id?: string | null
+        }
+        Update: {
+          completed_at?: string | null
+          consent_completed?: boolean | null
+          current_step?: number | null
+          id?: string
+          last_activity_at?: string | null
+          metadata?: Json | null
+          preferences_completed?: boolean | null
+          profile_completed?: boolean | null
+          role_setup_completed?: boolean | null
+          started_at?: string | null
+          steps_completed?: Json | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_onboarding_progress_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_rewards: {
         Row: {
           amount: number
@@ -614,7 +1028,27 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      check_emergency_controls: {
+        Args: { p_entity_id: string; p_entity_type: string }
+        Returns: boolean
+      }
+      cleanup_old_fraud_sessions: { Args: never; Returns: undefined }
+      complete_onboarding: { Args: { p_user_id: string }; Returns: boolean }
+      get_user_role:
+        | { Args: never; Returns: string }
+        | {
+            Args: { p_user_id: string }
+            Returns: Database["public"]["Enums"]["user_role"]
+          }
+      is_admin: { Args: never; Returns: boolean }
+      safe_increment_token_balance: {
+        Args: { p_amount: number; p_user_id: string }
+        Returns: number
+      }
+      update_publisher_trust_score: {
+        Args: { p_publisher_id: string }
+        Returns: number
+      }
     }
     Enums: {
       campaign_status:
@@ -782,5 +1216,15 @@ export const Constants = {
   },
 } as const
 
-export type Profile = Database['public']['Tables']['profiles']['Row'];
+// Convenience type aliases
+export type Profile = Tables<'profiles'>;
 export type UserRole = Database['public']['Enums']['user_role'];
+export type Campaign = Tables<'campaigns'>;
+export type Publisher = Tables<'publishers'>;
+export type Advertiser = Tables<'advertisers'>;
+export type Event = Tables<'events'>;
+export type Transaction = Tables<'transactions'>;
+export type UserReward = Tables<'user_rewards'>;
+export type Consent = Tables<'consents'>;
+export type AdCreative = Tables<'ad_creatives'>;
+export type PlatformSetting = Tables<'platform_settings'>;
