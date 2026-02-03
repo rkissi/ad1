@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { OnboardingLayout } from '../OnboardingLayout';
 import { OnboardingStepper } from '../OnboardingStepper';
-import { authenticatedFetch } from '@/lib/api-client';
+import { onboardingService } from '@/lib/onboarding-service';
 import { useAuth } from '@/lib/auth-context';
 import { useNavigate } from 'react-router-dom';
 
@@ -25,7 +25,7 @@ export function PublisherOnboarding() {
 
   useEffect(() => {
     if (profile?.onboarding_step) {
-        const lastCompletedStep = profile.onboarding_step.toLowerCase();
+        const lastCompletedStep = String(profile.onboarding_step).toLowerCase();
         const stepIndex = STEPS.findIndex(s => s.toLowerCase() === lastCompletedStep);
         if (stepIndex > -1) {
             setCurrentStep(stepIndex + 1);
@@ -40,16 +40,10 @@ export function PublisherOnboarding() {
       const updatedData = { ...formData, ...stepData };
       setFormData(updatedData);
 
-      await authenticatedFetch('/onboarding/step', {
-        method: 'POST',
-        body: JSON.stringify({
-          step: stepName,
-          data: stepData
-        })
-      });
+      await onboardingService.saveStep(stepName, stepData);
 
       if (currentStep === STEPS.length - 1) {
-          await authenticatedFetch('/onboarding/complete', { method: 'POST' });
+          await onboardingService.complete();
           await refreshProfile();
           navigate('/publisher');
       } else {

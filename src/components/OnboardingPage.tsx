@@ -3,7 +3,7 @@ import { useAuth } from '@/lib/auth-context';
 import { UserOnboarding } from './onboarding/user/UserOnboarding';
 import { AdvertiserOnboarding } from './onboarding/advertiser/AdvertiserOnboarding';
 import { PublisherOnboarding } from './onboarding/publisher/PublisherOnboarding';
-import { authenticatedFetch } from '@/lib/api-client';
+import { onboardingService } from '@/lib/onboarding-service';
 import { useNavigate } from 'react-router-dom';
 
 export default function OnboardingPage() {
@@ -18,7 +18,7 @@ export default function OnboardingPage() {
        if (profile && profile.onboarding_status === 'not_started') {
            // Call start to set in_progress
            try {
-               await authenticatedFetch('/onboarding/start', { method: 'POST' });
+               await onboardingService.start();
                await refreshProfile();
            } catch(e) {
                console.error('Failed to start onboarding:', e);
@@ -53,7 +53,7 @@ export default function OnboardingPage() {
                   <button
                     onClick={async () => {
                         try {
-                            await authenticatedFetch('/onboarding/complete', { method: 'POST' });
+                            await onboardingService.complete();
                             await refreshProfile();
                             navigate('/admin');
                         } catch (e) {
