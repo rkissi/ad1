@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -27,22 +27,28 @@ import {
 } from 'lucide-react';
 
 interface LandingPageProps {
+  initialStep?: 'login' | 'register';
   onLogin?: (credentials: { email: string; password: string }) => Promise<void>;
   onRegister?: (userData: { email: string; password: string; role: string; name: string }) => Promise<void>;
 }
 
-function LandingPage({ onLogin, onRegister }: LandingPageProps) {
+function LandingPage({ initialStep = 'register', onLogin, onRegister }: LandingPageProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'login' | 'register'>('register');
+  const [activeTab, setActiveTab] = useState<'login' | 'register'>(initialStep);
   const [formData, setFormData] = useState({
     email: '',
     password: '',
     name: '',
     role: 'user'
   });
+
+  // Sync activeTab if initialStep changes from parent (optional, but good practice)
+  useEffect(() => {
+    setActiveTab(initialStep);
+  }, [initialStep]);
 
   const handleSubmit = async (type: 'login' | 'register') => {
     setIsLoading(true);
@@ -91,7 +97,9 @@ function LandingPage({ onLogin, onRegister }: LandingPageProps) {
           role: formData.role,
           name: name
         });
-        setSuccess('Account created successfully! Redirecting to your dashboard...');
+        setSuccess('Account created successfully! Starting setup...');
+        // Note: The parent component or App.tsx handles the actual redirection
+        // once the auth state changes (e.g., user becomes authenticated)
       }
     } catch (error: any) {
       console.error('Authentication error:', error);
@@ -121,7 +129,7 @@ function LandingPage({ onLogin, onRegister }: LandingPageProps) {
 
       <div className="relative z-10 min-h-screen flex">
         {/* Left Side - Brand & Features */}
-        <div className="flex-1 flex flex-col justify-center px-8 lg:px-16 xl:px-24">
+        <div className="flex-1 flex flex-col justify-center px-8 lg:px-16 xl:px-24 hidden md:flex">
           {/* Logo & Brand */}
           <div className="mb-12">
             <div className="flex items-center space-x-3 mb-6">
@@ -202,10 +210,21 @@ function LandingPage({ onLogin, onRegister }: LandingPageProps) {
         </div>
 
         {/* Right Side - Authentication */}
-        <div className="w-full max-w-md flex flex-col justify-center px-8 lg:px-12">
+        <div className="w-full md:w-auto md:max-w-md flex flex-col justify-center px-8 lg:px-12 flex-shrink-0 mx-auto">
+          {/* Mobile Header */}
+          <div className="md:hidden text-center mb-8">
+            <div className="flex items-center justify-center space-x-2 mb-4">
+              <div className="w-10 h-10 bg-gradient-to-r from-cyan-400 to-purple-500 rounded-xl flex items-center justify-center backdrop-blur-sm">
+                <Zap className="w-6 h-6 text-white" />
+              </div>
+              <h1 className="text-2xl font-bold text-white">Metaverse Ads</h1>
+            </div>
+            <p className="text-purple-200">Own Your Data, Earn Rewards</p>
+          </div>
+
           <Card className="bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl">
             <CardHeader className="text-center pb-4">
-              <div className="w-16 h-16 bg-gradient-to-r from-cyan-400 to-purple-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <div className="w-16 h-16 bg-gradient-to-r from-cyan-400 to-purple-500 rounded-2xl flex items-center justify-center mx-auto mb-4 hidden md:flex">
                 <Sparkles className="w-8 h-8 text-white" />
               </div>
               <CardTitle className="text-2xl text-white">Join the Revolution</CardTitle>
@@ -230,7 +249,7 @@ function LandingPage({ onLogin, onRegister }: LandingPageProps) {
                 </Alert>
               )}
 
-              <Tabs defaultValue="register" className="w-full" onValueChange={(value) => setActiveTab(value as 'login' | 'register')}>
+              <Tabs value={activeTab} className="w-full" onValueChange={(value) => setActiveTab(value as 'login' | 'register')}>
                 <TabsList className="grid w-full grid-cols-2 bg-white/10 backdrop-blur-sm">
                   <TabsTrigger value="register" className="text-white data-[state=active]:bg-white/20">
                     Sign Up

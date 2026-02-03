@@ -8,6 +8,7 @@ import AdvertiserDashboard from "./components/AdvertiserDashboard";
 import PublisherDemo from "./components/PublisherDemo";
 import AdminDashboard from "./components/AdminDashboard";
 import OnboardingPage from "./components/OnboardingPage";
+import UserSettings from "./components/settings/UserSettings";
 import routes from "tempo-routes";
 
 const roleDashboardMap: Record<string, string> = {
@@ -39,14 +40,19 @@ function FullScreenLoader() {
 // Root Route Component - Handles logic for /
 function RootRoute() {
   const { isAuthenticated, profile, isLoading, login, register } = useAuth();
+  const location = useLocation();
 
   if (isLoading) {
     return <FullScreenLoader />;
   }
 
   if (!isAuthenticated) {
+    // Check if we have an "initialStep" state passed from redirect
+    const initialStep = (location.state as any)?.initialStep;
+
     return (
       <LandingPage
+        initialStep={initialStep}
         onLogin={async (credentials) => {
           try {
             await login(credentials.email, credentials.password);
@@ -114,7 +120,7 @@ function DashboardRoute({
     return <Navigate to="/" state={{ from: location }} replace />;
   }
 
-  // Check onboarding status
+  // Check onboarding status - Force redirect if not completed
   if (profile?.onboarding_status !== 'completed') {
       return <Navigate to="/onboarding" replace />;
   }
@@ -257,6 +263,15 @@ function AppContent() {
             } 
           />
 
+          <Route
+             path="/settings"
+             element={
+                 <ProtectedRoute>
+                     <UserSettings />
+                 </ProtectedRoute>
+             }
+          />
+
           <Route 
             path="/logout" 
             element={
@@ -264,11 +279,16 @@ function AppContent() {
             } 
           />
 
-          {/* Catch all - redirect to landing page (/) */}
-          <Route
+          {/* Explicit Login Route for deep linking / direct access */}
+           <Route
             path="/login"
-            element={<Navigate to="/" replace />}
+            element={<Navigate to="/" state={{ initialStep: 'login' }} replace />}
           />
+           <Route
+            path="/register"
+            element={<Navigate to="/" state={{ initialStep: 'register' }} replace />}
+          />
+
           <Route 
             path="*" 
             element={

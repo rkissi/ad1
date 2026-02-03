@@ -4,6 +4,7 @@ import { OnboardingStepper } from '../OnboardingStepper';
 import { onboardingService } from '@/lib/onboarding-service';
 import { useAuth } from '@/lib/auth-context';
 import { useNavigate } from 'react-router-dom';
+import { Check, Save } from 'lucide-react';
 
 const STEPS = ['Intent', 'Consent', 'Privacy', 'Rewards'];
 
@@ -12,6 +13,7 @@ export function UserOnboarding() {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
   const [formData, setFormData] = useState({
     intent: 'earn',
     allowed_categories: [] as string[],
@@ -21,15 +23,24 @@ export function UserOnboarding() {
     payout_threshold: 10,
   });
 
+  // Sync with profile step
   useEffect(() => {
     if (profile?.onboarding_step) {
         const lastCompletedStep = String(profile.onboarding_step).toLowerCase();
         const stepIndex = STEPS.findIndex(s => s.toLowerCase() === lastCompletedStep);
         if (stepIndex > -1) {
-            setCurrentStep(stepIndex + 1);
+            // If the user has completed a step, move them to the next one
+            // Ensure we don't go out of bounds
+            const nextStep = Math.min(stepIndex + 1, STEPS.length - 1);
+            setCurrentStep(nextStep);
         }
     }
   }, [profile]);
+
+  // Reset saved indicator on change
+  useEffect(() => {
+    setIsSaved(false);
+  }, [formData, currentStep]);
 
   const handleNext = async (stepData: any = {}) => {
     setIsLoading(true);
@@ -40,6 +51,10 @@ export function UserOnboarding() {
 
       // Save current step data
       await onboardingService.saveStep(stepName, stepData);
+
+      // Show saved indicator
+      setIsSaved(true);
+      setTimeout(() => setIsSaved(false), 3000);
 
       if (currentStep === STEPS.length - 1) {
           // Verify completion and redirect
@@ -207,6 +222,13 @@ export function UserOnboarding() {
 
   return (
     <OnboardingLayout title="Welcome User" subtitle="Let's set up your preferences">
+       <div className="flex justify-end mb-2 h-6">
+           {isSaved && (
+               <span className="text-xs text-green-600 flex items-center animate-fade-in-out">
+                   <Save className="w-3 h-3 mr-1" /> Progress saved
+               </span>
+           )}
+       </div>
       <OnboardingStepper steps={STEPS} currentStep={currentStep} />
       {renderStep()}
     </OnboardingLayout>

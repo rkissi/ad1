@@ -10,6 +10,7 @@ import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import { Navbar } from '@/components/ui/navbar';
+import { Skeleton } from "@/components/ui/skeleton";
 import { 
   Sidebar, 
   SidebarItem, 
@@ -293,6 +294,49 @@ export default function UserApp({ initialProfile }: UserAppProps) {
       />
     </div>
   );
+
+  if (isLoading) {
+      return (
+          <div className="flex h-screen bg-gray-50">
+               <Sidebar
+                collapsed={sidebarCollapsed}
+                onCollapsedChange={setSidebarCollapsed}
+                className="hidden lg:flex"
+               >
+                {sidebarCollapsed ? renderCollapsedSidebar() : renderSidebarContent()}
+               </Sidebar>
+               <div className="flex-1 flex flex-col overflow-hidden">
+                    <Navbar
+                        title="User Dashboard"
+                        user={{
+                            name: 'User',
+                            email: '',
+                            role: 'user',
+                            tokenBalance: '...'
+                        }}
+                        onLogout={logout}
+                        notifications={0}
+                    />
+                   <main className="flex-1 overflow-y-auto p-6 space-y-6">
+                       <div className="flex items-center justify-between">
+                           <div className="space-y-2">
+                               <Skeleton className="h-8 w-[250px]" />
+                               <Skeleton className="h-4 w-[200px]" />
+                           </div>
+                           <Skeleton className="h-10 w-[150px]" />
+                       </div>
+                       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                           <Skeleton className="h-32" />
+                           <Skeleton className="h-32" />
+                           <Skeleton className="h-32" />
+                           <Skeleton className="h-32" />
+                       </div>
+                       <Skeleton className="h-[400px]" />
+                   </main>
+               </div>
+          </div>
+      )
+  }
 
   return (
     <div className="flex h-screen bg-gray-50">
