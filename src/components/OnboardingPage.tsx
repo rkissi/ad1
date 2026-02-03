@@ -7,11 +7,13 @@ import { authenticatedFetch } from '@/lib/api-client';
 import { useNavigate } from 'react-router-dom';
 
 export default function OnboardingPage() {
-  const { profile, isLoading, refreshProfile } = useAuth();
+  const { user, profile, isLoading, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const [initializing, setInitializing] = useState(true);
 
   useEffect(() => {
+    if (!user) return;
+
     const init = async () => {
        if (profile && profile.onboarding_status === 'not_started') {
            // Call start to set in_progress
@@ -19,17 +21,14 @@ export default function OnboardingPage() {
                await authenticatedFetch('/onboarding/start', { method: 'POST' });
                await refreshProfile();
            } catch(e) {
-               console.error('Failed to start onboarding', e);
+               console.error('Failed to start onboarding:', e);
            }
        }
        setInitializing(false);
     }
-    if (!isLoading && profile) {
-        init();
-    } else if (!isLoading && !profile) {
-        setInitializing(false);
-    }
-  }, [isLoading, profile, refreshProfile]);
+
+    init();
+  }, [user]);
 
   if (isLoading || initializing) {
       return (

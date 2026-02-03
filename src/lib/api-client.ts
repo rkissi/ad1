@@ -8,8 +8,7 @@ export async function authenticatedFetch(endpoint: string, options: RequestInit 
   const token = session?.access_token;
 
   if (!token) {
-    // throw new Error('No active session');
-    console.warn('Making request without auth token');
+    throw new Error('No active session');
   }
 
   const headers: Record<string, string> = {
@@ -21,13 +20,19 @@ export async function authenticatedFetch(endpoint: string, options: RequestInit 
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  const url = `${API_BASE_URL}${endpoint}`;
+  const response = await fetch(url, {
     ...options,
     headers,
   });
 
   if (!response.ok) {
     const errorBody = await response.text();
+    console.error(`API request failed: ${url}`, {
+      status: response.status,
+      body: errorBody
+    });
+
     let errorMessage = response.statusText;
     try {
         const json = JSON.parse(errorBody);
