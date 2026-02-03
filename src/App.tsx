@@ -95,6 +95,39 @@ function OnboardingRoute() {
   return <OnboardingPage />;
 }
 
+// Dashboard Route Component - Handles role-based dashboards
+function DashboardRoute({
+  children,
+  allowedRoles,
+}: {
+  children: React.ReactNode;
+  allowedRoles?: Array<'user' | 'advertiser' | 'publisher' | 'admin'>;
+}) {
+  const { isAuthenticated, profile, isLoading } = useAuth();
+  const location = useLocation();
+
+  if (isLoading) {
+    return <FullScreenLoader />;
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/" state={{ from: location }} replace />;
+  }
+
+  // Check onboarding status
+  if (profile?.onboarding_status !== 'completed') {
+      return <Navigate to="/onboarding" replace />;
+  }
+
+  // Check role-based access
+  if (allowedRoles && profile?.role && !allowedRoles.includes(profile.role)) {
+    // Redirect to correct dashboard
+    return <Navigate to={getRoleDashboard(profile.role)} replace />;
+  }
+
+  return <>{children}</>;
+}
+
 // Protected Route Component with RBAC
 function ProtectedRoute({ 
   children, 
@@ -191,36 +224,36 @@ function AppContent() {
           <Route 
             path="/user" 
             element={
-              <ProtectedRoute allowedRoles={['user']}>
+              <DashboardRoute allowedRoles={['user']}>
                 <UserApp />
-              </ProtectedRoute>
+              </DashboardRoute>
             } 
           />
 
           <Route 
             path="/advertiser" 
             element={
-              <ProtectedRoute allowedRoles={['advertiser', 'admin']}>
+              <DashboardRoute allowedRoles={['advertiser', 'admin']}>
                 <AdvertiserDashboard />
-              </ProtectedRoute>
+              </DashboardRoute>
             } 
           />
 
           <Route 
             path="/publisher" 
             element={
-              <ProtectedRoute allowedRoles={['publisher', 'admin']}>
+              <DashboardRoute allowedRoles={['publisher', 'admin']}>
                 <PublisherDemo />
-              </ProtectedRoute>
+              </DashboardRoute>
             } 
           />
 
           <Route 
             path="/admin" 
             element={
-              <ProtectedRoute allowedRoles={['admin']}>
+              <DashboardRoute allowedRoles={['admin']}>
                 <AdminDashboard />
-              </ProtectedRoute>
+              </DashboardRoute>
             } 
           />
 
