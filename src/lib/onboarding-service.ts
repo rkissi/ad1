@@ -18,56 +18,73 @@ async function getAuthToken(): Promise<string> {
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token;
   if (!token) {
-    throw new Error('No active session');
+    throw new Error('No active session. Please log in again.');
   }
   return token;
 }
 
 // Call onboarding via Edge Function
 async function callEdgeFunction(action: string, data?: Record<string, any>): Promise<OnboardingResponse> {
-  const token = await getAuthToken();
-  
-  const { data: response, error } = await supabase.functions.invoke('supabase-functions-onboarding', {
-    body: { action, ...data },
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
+  try {
+    const token = await getAuthToken();
 
-  if (error) {
-    console.error('Edge function error:', error);
-    throw new Error(error.message || 'Onboarding request failed');
+    const { data: response, error } = await supabase.functions.invoke('supabase-functions-onboarding', {
+      body: { action, ...data },
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (error) {
+      console.error('Edge function error:', error);
+      throw new Error(error.message || 'Onboarding request failed');
+    }
+
+    if (response && response.error) {
+       throw new Error(response.error);
+    }
+
+    return response;
+  } catch (error: any) {
+    console.error('Onboarding Edge Function Error:', error);
+    throw error;
   }
-
-  return response;
 }
 
 // Call onboarding via Express API (for local dev)
 async function callExpressApi(endpoint: string, options: RequestInit = {}): Promise<OnboardingResponse> {
-  const token = await getAuthToken();
+  try {
+    const token = await getAuthToken();
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`,
-    ...options.headers as Record<string, string>,
-  };
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      ...options.headers as Record<string, string>,
+    };
 
-  const response = await fetch(`/api/onboarding${endpoint}`, {
-    ...options,
-    headers,
-  });
+    const response = await fetch(`/api/onboarding${endpoint}`, {
+      ...options,
+      headers,
+    });
 
-  if (!response.ok) {
-    const errorBody = await response.text();
-    let errorMessage = response.statusText;
-    try {
-      const json = JSON.parse(errorBody);
-      errorMessage = json.error || json.message || errorMessage;
-    } catch (e) {}
-    throw new Error(errorMessage);
+    if (!response.ok) {
+      const errorBody = await response.text();
+      let errorMessage = `Request failed: ${response.status} ${response.statusText}`;
+      try {
+        const json = JSON.parse(errorBody);
+        errorMessage = json.error || json.message || errorMessage;
+      } catch (e) {
+        // use raw text if json parse fails
+        if (errorBody) errorMessage = errorBody;
+      }
+      throw new Error(errorMessage);
+    }
+
+    return response.json();
+  } catch (error: any) {
+    console.error('Onboarding API Error:', error);
+    throw error;
   }
-
-  return response.json();
 }
 
 export const onboardingService = {
