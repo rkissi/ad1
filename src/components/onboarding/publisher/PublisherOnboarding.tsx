@@ -4,7 +4,7 @@ import { OnboardingStepper } from '../OnboardingStepper';
 import { onboardingService } from '@/lib/onboarding-service';
 import { useAuth } from '@/lib/auth-context';
 import { useNavigate } from 'react-router-dom';
-import { Check, Save } from 'lucide-react';
+import { Check, Save, AlertCircle } from 'lucide-react';
 
 const STEPS = ['Platform', 'Integration', 'Monetization', 'Verification'];
 
@@ -15,6 +15,7 @@ export function PublisherOnboarding() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     platform_type: 'web',
     content_categories: [] as string[],
@@ -35,13 +36,15 @@ export function PublisherOnboarding() {
     }
   }, [profile]);
 
-  // Reset saved indicator on change
+  // Reset saved indicator and error on change
   useEffect(() => {
     setIsSaved(false);
+    setError(null);
   }, [formData, currentStep]);
 
   const handleNext = async (stepData: any = {}) => {
     setIsLoading(true);
+    setError(null);
     try {
       const stepName = STEPS[currentStep].toLowerCase();
       const updatedData = { ...formData, ...stepData };
@@ -59,9 +62,9 @@ export function PublisherOnboarding() {
           setCurrentStep(prev => prev + 1);
           await refreshProfile();
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      alert('Failed to save progress.');
+      setError(error.message || 'Failed to save progress.');
     } finally {
       setIsLoading(false);
     }
@@ -248,11 +251,16 @@ export function PublisherOnboarding() {
 
   return (
     <OnboardingLayout title="Publisher Setup" subtitle="Monetize your content">
-      <div className="flex justify-end mb-2 h-6">
+      <div className="flex flex-col items-end mb-2 min-h-6">
            {isSaved && (
                <span className="text-xs text-green-600 flex items-center animate-fade-in-out">
                    <Save className="w-3 h-3 mr-1" /> Progress saved
                </span>
+           )}
+           {error && (
+             <div className="text-xs text-red-600 flex items-center mt-1 p-2 bg-red-50 rounded border border-red-200 w-full justify-center">
+                 <AlertCircle className="w-3 h-3 mr-1" /> {error}
+             </div>
            )}
        </div>
       <OnboardingStepper steps={STEPS} currentStep={currentStep} />

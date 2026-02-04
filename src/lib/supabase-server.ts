@@ -8,7 +8,11 @@ const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn('Missing Supabase environment variables for server. Onboarding routes may fail.');
+  console.error(
+    'CRITICAL: Missing Supabase credentials in environment variables.\n' +
+    'Please ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set in your .env file.\n' +
+    'Onboarding and Auth routes will fail without these.'
+  );
 }
 
 // Create a single supabase client for server-side operations
@@ -27,9 +31,13 @@ export const supabaseServer = createClient<Database>(
 );
 
 export const createServerClient = (accessToken?: string) => {
+  if (!supabaseUrl || !supabaseAnonKey) {
+     throw new Error('Server misconfiguration: Missing Supabase credentials');
+  }
+
   return createClient<Database>(
-    supabaseUrl || '',
-    supabaseAnonKey || '',
+    supabaseUrl,
+    supabaseAnonKey,
     {
       auth: {
         autoRefreshToken: false,
