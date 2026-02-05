@@ -10,7 +10,8 @@ import {
   MatchingService, 
   EventService, 
   PublisherService 
-} from '../lib/backend-services';
+} from './services';
+import onboardingRoutes from './routes/onboarding';
 import BlockchainIntegrationService from '../lib/blockchain-integration';
 import DatabaseService from '../lib/database';
 import { eventTracker } from '../lib/event-tracker';
@@ -31,6 +32,9 @@ const blockchainService = new BlockchainIntegrationService();
 // Initialize database and blockchain
 async function initializeServices() {
   try {
+    // db.initialize() creates tables if using the custom DatabaseService.
+    // Since we are moving towards Supabase, we might not strictly need this
+    // but it's good for health checks and legacy support.
     await db.initialize();
     await blockchainService.initialize();
     console.log('✅ All services initialized successfully');
@@ -126,6 +130,10 @@ app.get('/health', async (req, res) => {
     data: healthStatus 
   });
 });
+
+// ==================== ONBOARDING ROUTES ====================
+// Mount onboarding routes protected by auth
+app.use('/api/onboarding', authenticateToken, onboardingRoutes);
 
 // ==================== AUTHENTICATION ROUTES ====================
 

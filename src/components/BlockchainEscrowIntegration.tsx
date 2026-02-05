@@ -18,7 +18,7 @@ import {
   Users,
   Loader2
 } from 'lucide-react';
-import { useBlockchainIntegration } from '@/lib/blockchain-integration';
+import { useBlockchainIntegration } from '@/lib/blockchain-hooks';
 import { Campaign } from '@/types/platform';
 
 interface BlockchainEscrowIntegrationProps {

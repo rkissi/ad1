@@ -1,7 +1,13 @@
 import { Router } from 'express';
 import Stripe from 'stripe';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
+// Use a dummy key if missing to prevent startup crash, but warn.
+const stripeKey = process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder_key_to_prevent_crash';
+if (!process.env.STRIPE_SECRET_KEY) {
+  console.warn('⚠️ STRIPE_SECRET_KEY is missing. Payment features will fail.');
+}
+
+const stripe = new Stripe(stripeKey, {
   apiVersion: '2024-12-18.acacia'
 });
 

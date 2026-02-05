@@ -54,6 +54,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
 
+  const fetchProfileWithRetry = async (userId: string, retries = 5, delay = 500) => {
+    for (let i = 0; i < retries; i++) {
+      const { data: userProfile, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (!error && userProfile) {
+        return userProfile;
+      }
+
+      // If error is not 'PGRST116' (no rows) and it's a real error, log it but retry
+      if (error && error.code !== 'PGRST116') {
+         console.warn(`Error fetching profile (attempt ${i + 1}):`, error);
+      }
+
+      if (i < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    return null;
+  };
+
   // Initialize auth state
   useEffect(() => {
     let mounted = true;
@@ -74,13 +98,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (mounted) setSession(currentSession);
 
-        const { data: userProfile, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', currentSession.user.id)
-          .maybeSingle();
-
-        if (error) throw error;
+        const userProfile = await fetchProfileWithRetry(currentSession.user.id);
 
         if (mounted) {
           if (userProfile) {
@@ -88,7 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setUser(profileToUser(userProfile));
             console.log('User state initialized');
           } else {
-            console.warn('Profile not found for session user');
+            console.warn('Profile not found for session user after retries');
             setProfile(null);
             setUser(null);
           }
@@ -175,13 +193,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (data.user && data.session) {
         setSession(data.session);
         
-        const { data: userProfile, error: profileError } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', data.user.id)
-          .maybeSingle();
-
-        if (profileError) throw profileError;
+        const userProfile = await fetchProfileWithRetry(data.user.id);
 
         if (userProfile) {
           setProfile(userProfile);
@@ -239,14 +251,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (data.user) {
         if (data.session) setSession(data.session);
 
-        // Fetch profile once (no polling as per requirement)
-        const { data: userProfile, error: profileError } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', data.user.id)
-          .maybeSingle();
+        // Fetch profile with retry to allow trigger to complete
+        const userProfile = await fetchProfileWithRetry(data.user.id);
 
-        if (!profileError && userProfile) {
+        if (userProfile) {
           setProfile(userProfile);
           setUser(profileToUser(userProfile));
         }
