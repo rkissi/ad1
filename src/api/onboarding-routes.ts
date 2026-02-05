@@ -46,6 +46,17 @@ const requireAuth = async (req: Request, res: Response, next: Function) => {
 
 onboardingRouter.use(requireAuth);
 
+// Helper to format error
+const formatError = (error: any) => {
+  if (typeof error === 'string') return error;
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null) {
+    if (error.code === 'PGRST116') return 'Profile not found';
+    return error.message || error.error || JSON.stringify(error);
+  }
+  return 'Unknown error';
+};
+
 // GET /status
 onboardingRouter.get('/status', async (req: Request, res: Response) => {
   try {
@@ -61,7 +72,8 @@ onboardingRouter.get('/status', async (req: Request, res: Response) => {
     res.json(profile);
   } catch (error: any) {
     console.error('Get status error:', error);
-    res.status(500).json({ error: error.message });
+    const status = error?.code === 'PGRST116' ? 404 : 500;
+    res.status(status).json({ error: formatError(error) });
   }
 });
 
@@ -93,14 +105,11 @@ onboardingRouter.post('/start', async (req: Request, res: Response) => {
 
     if (updateError) throw updateError;
 
-    // 4. Initialize role specific table if needed
-    // (Upsert with empty values just to ensure row exists?)
-    // Actually, we can skip this and let /step handle inserts/upserts.
-
     res.json({ success: true, status: 'in_progress' });
   } catch (error: any) {
     console.error('Start onboarding error:', error);
-    res.status(500).json({ error: error.message });
+    const status = error?.code === 'PGRST116' ? 404 : 500;
+    res.status(status).json({ error: formatError(error) });
   }
 });
 
@@ -165,7 +174,8 @@ onboardingRouter.post('/step', async (req: Request, res: Response) => {
     res.json({ success: true, step });
   } catch (error: any) {
     console.error('Update step error:', error);
-    res.status(500).json({ error: error.message });
+    const status = error?.code === 'PGRST116' ? 404 : 500;
+    res.status(status).json({ error: formatError(error) });
   }
 });
 
@@ -188,7 +198,7 @@ onboardingRouter.post('/complete', async (req: Request, res: Response) => {
     res.json({ success: true, status: 'completed' });
   } catch (error: any) {
     console.error('Complete onboarding error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatError(error) });
   }
 });
 
@@ -220,7 +230,7 @@ onboardingRouter.post('/user', async (req: Request, res: Response) => {
 
      res.json({ success: true });
    } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatError(error) });
    }
 });
 
@@ -243,7 +253,7 @@ onboardingRouter.post('/advertiser', async (req: Request, res: Response) => {
 
      res.json({ success: true });
    } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatError(error) });
    }
 });
 
@@ -266,6 +276,6 @@ onboardingRouter.post('/publisher', async (req: Request, res: Response) => {
 
      res.json({ success: true });
    } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: formatError(error) });
    }
 });
