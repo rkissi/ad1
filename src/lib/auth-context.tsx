@@ -194,9 +194,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (error: any) {
       // Don't log if it's an abort error which is expected during hot reloads or fast UI switches
-      if (!error.message?.includes('AbortError')) {
-          console.error('❌ Login error:', error);
+      if (error.message?.includes('AbortError') || error.name === 'AbortError') {
+          console.warn('Login aborted (likely due to navigation or unmount).');
+          return;
       }
+      console.error('❌ Login error:', error);
       throw error;
     } finally {
       setIsAuthenticating(false);
@@ -269,9 +271,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
     } catch (error: any) {
-      if (!error.message?.includes('AbortError')) {
-          console.error('❌ Registration error:', error.message || error);
+      if (error.message?.includes('AbortError') || error.name === 'AbortError') {
+          console.warn('Registration aborted (likely due to navigation or unmount).');
+          return;
       }
+      console.error('❌ Registration error:', error.message || error);
       throw error;
     } finally {
       setIsAuthenticating(false);
