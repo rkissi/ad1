@@ -4,14 +4,14 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
+const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || 'placeholder-key';
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error(
-    'CRITICAL: Missing Supabase credentials in environment variables.\n' +
+if (!process.env.VITE_SUPABASE_URL || !process.env.VITE_SUPABASE_ANON_KEY) {
+  console.warn(
+    '⚠️ Missing Supabase credentials in environment variables. Using placeholders.\n' +
     'Please ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set in your .env file.\n' +
-    'Onboarding and Auth routes will fail without these.'
+    'Real database operations will fail.'
   );
 }
 
@@ -20,8 +20,8 @@ if (!supabaseUrl || !supabaseAnonKey) {
 // using createsClient(..., { global: { headers: { Authorization: ... } } })
 // or we can use this client for admin/anon operations.
 export const supabaseServer = createClient<Database>(
-  supabaseUrl || '',
-  supabaseAnonKey || '',
+  supabaseUrl,
+  supabaseAnonKey,
   {
     auth: {
       autoRefreshToken: false,

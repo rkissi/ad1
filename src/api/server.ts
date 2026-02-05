@@ -1,6 +1,7 @@
 // Production API Server for Metaverse Advertising Platform
 import dotenv from 'dotenv';
 dotenv.config();
+import { fileURLToPath } from 'url';
 import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -557,23 +558,6 @@ metaverse_ads_fraud_alerts_total ${metrics.fraud.totalAlerts}
     
     logger.info('API server stopped');
   }
-}
-
-// Start server if run directly
-if (require.main === module) {
-  const server = new ApiServer();
-  server.start();
-
-  // Graceful shutdown
-  process.on('SIGTERM', async () => {
-    await server.stop();
-    process.exit(0);
-  });
-
-  process.on('SIGINT', async () => {
-    await server.stop();
-    process.exit(0);
-  });
 }
 
 export default ApiServer;

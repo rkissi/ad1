@@ -10,7 +10,7 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "types:supabase": "npx supabase gen types typescript --project-id $SUPABASE_PROJECT_ID > src/types/supabase.ts",
-    "api:dev": "tsx watch src/api/server.ts",
+    "api:dev": "tsx watch src/api/start.ts",
     "api:build": "tsc -p tsconfig.json",
     "api:start": "node dist/api/server.js",
     "test": "jest",
