@@ -68,7 +68,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // If error is not 'PGRST116' (no rows) and it's a real error, log it but retry
       if (error && error.code !== 'PGRST116') {
-         console.warn(`Error fetching profile (attempt ${i + 1}):`, error);
+         // Specifically handle AbortError (often happens during auth transition)
+         if (error.message?.includes('AbortError') || error.name === 'AbortError') {
+             console.warn(`Fetch aborted (attempt ${i + 1}), retrying...`);
+         } else {
+             console.warn(`Error fetching profile (attempt ${i + 1}):`, error);
+         }
       }
 
       if (i < retries - 1) {
@@ -143,20 +148,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         setSession(newSession);
 
+        // Use retry logic here too for consistency
         try {
-          const { data: userProfile } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', newSession.user.id)
-            .maybeSingle();
+          const userProfile = await fetchProfileWithRetry(newSession.user.id);
 
           if (mounted) {
             if (userProfile) {
               setProfile(userProfile);
               setUser(profileToUser(userProfile));
             } else {
-              setProfile(null);
-              setUser(null);
+              // Don't clear user here if it might be pending creation
+              // But if retries failed, maybe we should?
+              // For now, keep existing state or null if strictly required
+              // setProfile(null);
+              // setUser(null);
             }
           }
         } catch (error) {
@@ -191,17 +196,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (data.user && data.session) {
-        setSession(data.session);
+        // Let the onAuthStateChange listener handle the session update to avoid race conditions
+        // But if we want to ensure profile is loaded before resolving login(), we can wait a bit
         
+        // Wait a short moment to allow the Supabase client to stabilize auth state
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Try to fetch profile to confirm login success
         const userProfile = await fetchProfileWithRetry(data.user.id);
 
         if (userProfile) {
+          // Explicitly set if found, in case listener is slow
+          setSession(data.session);
           setProfile(userProfile);
           setUser(profileToUser(userProfile));
           console.log('✅ Login successful:', email);
         } else {
           console.warn('Profile not found for user:', data.user.id);
-          // Handle case where profile might not be created yet
         }
       }
     } catch (error: any) {
