@@ -17,6 +17,17 @@ import { environmentManager, logger } from '../lib/environment-manager';
 import { paymentRouter } from './payment-routes';
 import adminRouter from './admin-routes';
 import { onboardingRouter } from './onboarding-routes';
+import { createServerClient } from '../lib/supabase-server';
+
+// Extend Request type to include token
+declare global {
+  namespace Express {
+    interface Request {
+      token?: string;
+      user?: any; // Supabase user object
+    }
+  }
+}
 
 export class ApiServer {
   private app: Express;
@@ -32,6 +43,7 @@ export class ApiServer {
     this.port = environmentManager.getApiConfig().port;
     
     // Initialize services
+    // @deprecated - Legacy DatabaseService is being deprecated in favor of Supabase Native
     this.db = new DatabaseService();
     this.contractService = new SmartContractService();
     this.transactionManager = new TransactionManager(this.db, this.contractService);
@@ -83,6 +95,36 @@ export class ApiServer {
     });
   }
 
+  // Middleware to extract and verify Supabase auth token
+  private requireAuth = async (req: Request, res: Response, next: Function) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: 'No authorization header' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ error: 'Invalid authorization header' });
+    }
+
+    try {
+      const supabase = createServerClient(token);
+      const { data: { user }, error } = await supabase.auth.getUser();
+
+      if (error || !user) {
+        console.error('Auth verification failed:', error);
+        return res.status(401).json({ error: 'Invalid token' });
+      }
+
+      req.token = token;
+      req.user = user;
+      next();
+    } catch (error) {
+      console.error('Auth middleware error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
   private setupRoutes(): void {
     // Health check
     this.app.get('/health', async (req, res) => {
@@ -93,113 +135,25 @@ export class ApiServer {
     // API v1 routes
     const apiRouter = express.Router();
 
-    // ==================== AUTHENTICATION ====================
-    apiRouter.post('/auth/register', async (req, res, next) => {
-      try {
-        const { email, password, name, role = 'user' } = req.body;
-        
-        // Validate input
-        if (!email || !password) {
-          return res.status(400).json({ 
-            success: false,
-            error: { message: 'Email and password are required' }
-          });
-        }
+    // ==================== AUTHENTICATION (DEPRECATED) ====================
+    // Legacy routes removed to enforce Supabase Auth migration
+    // apiRouter.post('/auth/register', ...)
+    // apiRouter.post('/auth/login', ...)
 
-        // Check if user exists
-        const existingUser = await this.db.getUserByEmail(email);
-        if (existingUser) {
-          return res.status(409).json({ 
-            success: false,
-            error: { message: 'User already exists' }
-          });
-        }
-
-        // Create user (password hashing would be done here)
-        const userDid = `did:${role}:${Date.now()}`;
-        const user = await this.db.createUser({
-          did: userDid,
-          email,
-          passwordHash: password, // In production, use bcrypt
-          displayName: name || email.split('@')[0],
-          interests: [],
-          rewardPreferences: {},
-          consents: {},
-          pdsUrl: ''
-        });
-
-        const userData = {
-          did: user.did,
-          email: user.email,
-          displayName: user.displayName,
-          role: role,
-          interests: user.interests || []
-        };
-
-        res.status(201).json({ 
-          success: true,
-          data: {
-            user: userData,
-            token: `jwt-token-${userDid}`
-          }
-        });
-      } catch (error: any) {
-        console.error('Registration error:', error);
-        res.status(500).json({
-          success: false,
-          error: { message: error.message || 'Registration failed' }
-        });
-      }
+    apiRouter.all('/auth/*', (req, res) => {
+      res.status(410).json({
+        error: 'Legacy authentication endpoints are deprecated. Please use Supabase Auth.',
+        code: 'AUTH_DEPRECATED'
+      });
     });
 
-    apiRouter.post('/auth/login', async (req, res, next) => {
-      try {
-        const { email, password } = req.body;
-        
-        if (!email || !password) {
-          return res.status(400).json({
-            success: false,
-            error: { message: 'Email and password are required' }
-          });
-        }
-
-        const user = await this.db.getUserByEmail(email);
-        if (!user || user.passwordHash !== password) {
-          return res.status(401).json({ 
-            success: false,
-            error: { message: 'Invalid email or password' }
-          });
-        }
-
-        const userData = {
-          did: user.did,
-          email: user.email,
-          displayName: user.displayName,
-          role: user.did.includes('advertiser') ? 'advertiser' : 
-                user.did.includes('publisher') ? 'publisher' : 
-                user.did.includes('admin') ? 'admin' : 'user',
-          interests: user.interests || []
-        };
-
-        res.json({ 
-          success: true,
-          data: {
-            user: userData,
-            token: `jwt-token-${user.did}`
-          }
-        });
-      } catch (error: any) {
-        console.error('Login error:', error);
-        res.status(500).json({
-          success: false,
-          error: { message: error.message || 'Login failed' }
-        });
-      }
-    });
+    // Force Supabase Auth on all other API routes
+    apiRouter.use(this.requireAuth);
 
     // ==================== CAMPAIGNS ====================
     apiRouter.post('/campaigns', async (req, res, next) => {
       try {
+        // TODO: Update to use req.user.id (Supabase UUID)
         const campaign = await this.db.createCampaign(req.body);
         res.status(201).json(campaign);
       } catch (error) {
@@ -477,8 +431,9 @@ export class ApiServer {
     this.app.use('/api/v1', apiRouter);
 
     // Mount routers
-    this.app.use('/api/v1/payments', paymentRouter);
-    this.app.use('/api/v1/admin', adminRouter);
+    // Note: onboardingRouter already has its own requireAuth, but paymentRouter and adminRouter did not.
+    this.app.use('/api/v1/payments', this.requireAuth, paymentRouter);
+    this.app.use('/api/v1/admin', this.requireAuth, adminRouter);
     this.app.use('/api/onboarding', onboardingRouter);
 
     // Metrics endpoint
