@@ -36,7 +36,7 @@ export const DEFAULT_CONTRACT_CONFIG: ContractConfig = {
 };
 
 // Contract ABIs (simplified for demo)
-const MARKETPLACE_ABI = [
+export const MARKETPLACE_ABI = [
   "function depositCampaignFunds(string campaignId, uint256 amount) external",
   "function releaseFunds(string campaignId, address[] recipients, uint256[] amounts) external",
   "function getCampaignBalance(string campaignId) external view returns (uint256)",
@@ -47,7 +47,7 @@ const MARKETPLACE_ABI = [
   "event ConsentRecorded(string indexed userDid, string scope, string campaignId)"
 ];
 
-const TOKEN_ABI = [
+export const TOKEN_ABI = [
   "function balanceOf(address account) external view returns (uint256)",
   "function transfer(address to, uint256 amount) external returns (bool)",
   "function approve(address spender, uint256 amount) external returns (bool)",
@@ -368,21 +368,6 @@ export class ContractUtils {
     return ethers.getAddress('0x' + hash.slice(-40));
   }
 
-  /** 
-   * Generate deterministic private key from DID
-   */
-  static didToPrivateKey(did: string): string {
-    const hash = ethers.keccak256(ethers.toUtf8Bytes(did + '_private'));
-    return hash;
-  }
-
-  /** 
-   * Create wallet from DID
-   */
-  static createWalletFromDid(did: string, provider?: ethers.Provider): ethers.Wallet {
-    const privateKey = ContractUtils.didToPrivateKey(did);
-    return new ethers.Wallet(privateKey, provider);
-  }
 
   /** 
    * Format token amount for display
