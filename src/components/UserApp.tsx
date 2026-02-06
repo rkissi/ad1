@@ -41,7 +41,11 @@ import {
   History,
   Loader2
 } from 'lucide-react';
-import { useAuthSafe, rewardsAPI, consentAPI, eventAPI, analyticsAPI } from '@/lib/auth-context';
+import { useAuthSafe } from '@/lib/auth-context';
+import { rewardsAPI } from '@/lib/api/rewards';
+import { consentAPI } from '@/lib/api/consents';
+import { eventAPI } from '@/lib/api/events';
+import { analyticsAPI } from '@/lib/api/analytics';
 import { marketplaceService } from '@/lib/marketplace-service';
 import type { UserReward, Consent, Event } from '@/types/supabase';
 

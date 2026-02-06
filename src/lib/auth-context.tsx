@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { normalizeEmail, validateEmail } from './validation';
 import type { Session } from '@supabase/supabase-js';
@@ -54,33 +54,62 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
 
-  const fetchProfileWithRetry = async (userId: string, retries = 5, delay = 500) => {
-    for (let i = 0; i < retries; i++) {
-      const { data: userProfile, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
+  // Ref to store active profile fetch promise to deduplicate requests
+  const fetchProfilePromiseRef = useRef<{userId: string, promise: Promise<Profile | null>} | null>(null);
 
-      if (!error && userProfile) {
-        return userProfile;
+  const fetchProfileWithRetry = async (userId: string, retries = 5, delay = 500): Promise<Profile | null> => {
+    // Deduplication: if we are already fetching for this user, return the existing promise
+    if (fetchProfilePromiseRef.current?.userId === userId) {
+      return fetchProfilePromiseRef.current.promise;
+    }
+
+    const fetchPromise = (async () => {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const { data: userProfile, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', userId)
+            .maybeSingle();
+
+          if (!error && userProfile) {
+            return userProfile;
+          }
+
+          if (error && error.code !== 'PGRST116') {
+             // Handle AbortError
+             const isAbort = error.name === 'AbortError' || error.message?.includes('AbortError');
+             if (isAbort) {
+                 console.debug(`Fetch aborted (attempt ${i + 1})`);
+             } else {
+                 console.warn(`Error fetching profile (attempt ${i + 1}):`, error);
+             }
+          }
+        } catch (e: any) {
+           if (e.name === 'AbortError' || e.message?.includes('AbortError')) {
+              console.debug(`Fetch aborted (attempt ${i + 1})`);
+           } else {
+              console.warn(`Exception fetching profile (attempt ${i + 1}):`, e);
+           }
+        }
+
+        if (i < retries - 1) {
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
       }
+      return null;
+    })();
 
-      // If error is not 'PGRST116' (no rows) and it's a real error, log it but retry
-      if (error && error.code !== 'PGRST116') {
-         // Specifically handle AbortError (often happens during auth transition)
-         if (error.message?.includes('AbortError') || error.name === 'AbortError') {
-             console.warn(`Fetch aborted (attempt ${i + 1}), retrying...`);
-         } else {
-             console.warn(`Error fetching profile (attempt ${i + 1}):`, error);
-         }
-      }
+    fetchProfilePromiseRef.current = { userId, promise: fetchPromise };
 
-      if (i < retries - 1) {
-        await new Promise(resolve => setTimeout(resolve, delay));
+    try {
+      return await fetchPromise;
+    } finally {
+      // Clear the ref when done so future calls (e.g. refresh) can fetch again
+      if (fetchProfilePromiseRef.current?.userId === userId) {
+        fetchProfilePromiseRef.current = null;
       }
     }
-    return null;
   };
 
   // Initialize auth state
@@ -116,8 +145,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setUser(null);
           }
         }
-      } catch (error) {
-        console.error('Auth initialization error:', error);
+      } catch (error: any) {
+        if (error.name === 'AbortError' || error.message?.includes('AbortError')) {
+           console.debug('Auth initialization aborted');
+        } else {
+           console.error('Auth initialization error:', error);
+        }
         if (mounted) {
           setUser(null);
           setProfile(null);
@@ -148,21 +181,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         setSession(newSession);
 
-        // Use retry logic here too for consistency
         try {
+          // fetchProfileWithRetry is now deduplicated, so perfectly safe to call here
           const userProfile = await fetchProfileWithRetry(newSession.user.id);
 
-          if (mounted) {
-            if (userProfile) {
-              setProfile(userProfile);
-              setUser(profileToUser(userProfile));
-            } else {
-              // Don't clear user here if it might be pending creation
-              // But if retries failed, maybe we should?
-              // For now, keep existing state or null if strictly required
-              // setProfile(null);
-              // setUser(null);
-            }
+          if (mounted && userProfile) {
+            setProfile(userProfile);
+            setUser(profileToUser(userProfile));
           }
         } catch (error) {
           console.error('Error handling auth state change:', error);
@@ -179,9 +204,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (email: string, password: string) => {
     console.log('Attempting login for:', email);
 
-    // Prevent concurrent login attempts
     if (isAuthenticating) return;
-
     setIsAuthenticating(true);
     
     try {
@@ -196,29 +219,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (data.user && data.session) {
-        // Let the onAuthStateChange listener handle the session update to avoid race conditions
-        // But if we want to ensure profile is loaded before resolving login(), we can wait a bit
-        
-        // Wait a short moment to allow the Supabase client to stabilize auth state
+        // Wait a moment for triggers/consistency
         await new Promise(resolve => setTimeout(resolve, 100));
 
-        // Try to fetch profile to confirm login success
+        // Explicitly fetch profile.
+        // Note: onAuthStateChange will also call this, but thanks to deduplication,
+        // it will just await the same promise.
         const userProfile = await fetchProfileWithRetry(data.user.id);
 
         if (userProfile) {
-          // Explicitly set if found, in case listener is slow
           setSession(data.session);
           setProfile(userProfile);
           setUser(profileToUser(userProfile));
           console.log('✅ Login successful:', email);
         } else {
           console.warn('Profile not found for user:', data.user.id);
+          // Don't throw here, as user might need to be created or it's just slow
         }
       }
     } catch (error: any) {
-      // Don't log if it's an abort error which is expected during hot reloads or fast UI switches
       if (error.message?.includes('AbortError') || error.name === 'AbortError') {
-          console.warn('Login aborted (likely due to navigation or unmount).');
+          console.warn('Login aborted.');
           return;
       }
       console.error('❌ Login error:', error);
@@ -232,9 +253,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const normalizedEmail = normalizeEmail(email);
     const normalizedName = name.trim();
 
-    // Prevent concurrent registration attempts
     if (isAuthenticating) return;
-
     setIsAuthenticating(true);
 
     if (!validateEmail(normalizedEmail)) {
@@ -262,7 +281,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (data.user) {
         if (data.session) setSession(data.session);
 
-        // Fetch profile with retry to allow trigger to complete
         const userProfile = await fetchProfileWithRetry(data.user.id);
 
         if (userProfile) {
@@ -270,8 +288,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(profileToUser(userProfile));
         }
 
-        // Handle role-specific records if session exists
         if (data.session) {
+          // These operations are safe to run even if duplicates occur, due to upsert
           if (role === 'advertiser') {
             await supabase
               .from('advertisers')
@@ -291,7 +309,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (error: any) {
       if (error.message?.includes('AbortError') || error.name === 'AbortError') {
-          console.warn('Registration aborted (likely due to navigation or unmount).');
+          console.warn('Registration aborted.');
           return;
       }
       console.error('❌ Registration error:', error.message || error);
@@ -342,11 +360,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshProfile = async () => {
     if (!session?.user?.id) return;
 
-    const { data: userProfile } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', session.user.id)
-      .maybeSingle();
+    // We can just use fetchProfileWithRetry logic here, but maybe we want to force fresh?
+    // fetchProfileWithRetry uses caching if a request is IN PROGRESS.
+    // If no request is in progress, it fetches fresh.
+    const userProfile = await fetchProfileWithRetry(session.user.id);
 
     if (userProfile) {
       setProfile(userProfile);
@@ -401,500 +418,5 @@ export function useAuthSafe() {
   }
   return context;
 }
-
-// Supabase-based API functions for campaigns
-export const campaignAPI = {
-  create: async (campaignData: any) => {
-    const { data, error } = await supabase
-      .from('campaigns')
-      .insert(campaignData)
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
-  },
-
-  getAll: async (advertiserId?: string) => {
-    let query = supabase.from('campaigns').select('*');
-    if (advertiserId) {
-      query = query.eq('advertiser_id', advertiserId);
-    }
-    const { data, error } = await query.order('created_at', { ascending: false });
-    if (error) throw error;
-    return data;
-  },
-
-  getById: async (id: string) => {
-    const { data, error } = await supabase
-      .from('campaigns')
-      .select('*')
-      .eq('id', id)
-      .single();
-    if (error) throw error;
-    return data;
-  },
-
-  update: async (id: string, updates: any) => {
-    const { data, error } = await supabase
-      .from('campaigns')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
-  },
-
-  delete: async (id: string) => {
-    const { error } = await supabase
-      .from('campaigns')
-      .delete()
-      .eq('id', id);
-    if (error) throw error;
-  },
-
-  getMetrics: async (id: string) => {
-    const { data, error } = await supabase
-      .from('campaigns')
-      .select('impressions, clicks, conversions, ctr, spent, budget')
-      .eq('id', id)
-      .single();
-    if (error) throw error;
-    return data;
-  },
-
-  getEvents: async (id: string) => {
-    const { data, error } = await supabase
-      .from('events')
-      .select('*')
-      .eq('campaign_id', id)
-      .order('timestamp', { ascending: false })
-      .limit(100);
-    if (error) throw error;
-    return data;
-  }
-};
-
-// Event tracking API functions
-export const eventAPI = {
-  trackImpression: async (eventData: any) => {
-    const { data, error } = await supabase
-      .from('events')
-      .insert({ ...eventData, type: 'impression' })
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
-  },
-
-  trackClick: async (eventData: any) => {
-    const { data, error } = await supabase
-      .from('events')
-      .insert({ ...eventData, type: 'click' })
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
-  },
-
-  trackConversion: async (eventData: any) => {
-    const { data, error } = await supabase
-      .from('events')
-      .insert({ ...eventData, type: 'conversion' })
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
-  },
-
-  batchTrack: async (events: any[]) => {
-    const { data, error } = await supabase
-      .from('events')
-      .insert(events)
-      .select();
-    if (error) throw error;
-    return data;
-  },
-
-  getUserEvents: async (userId: string) => {
-    const { data, error } = await supabase
-      .from('events')
-      .select('*')
-      .eq('user_id', userId)
-      .order('timestamp', { ascending: false })
-      .limit(100);
-    if (error) throw error;
-    return data;
-  }
-};
-
-// Publisher API functions
-export const publisherAPI = {
-  create: async (publisherData: any) => {
-    const { data, error } = await supabase
-      .from('publishers')
-      .insert(publisherData)
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
-  },
-
-  getById: async (id: string) => {
-    const { data, error } = await supabase
-      .from('publishers')
-      .select('*')
-      .eq('id', id)
-      .single();
-    if (error) throw error;
-    return data;
-  },
-
-  getByUserId: async (userId: string) => {
-    const { data, error } = await supabase
-      .from('publishers')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
-    if (error) throw error;
-    return data;
-  },
-
-  update: async (id: string, updates: any) => {
-    const { data, error } = await supabase
-      .from('publishers')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
-  },
-
-  getMetrics: async (id: string) => {
-    const { data, error } = await supabase
-      .from('publishers')
-      .select('total_impressions, total_clicks, total_earnings')
-      .eq('id', id)
-      .single();
-    if (error) throw error;
-    return data;
-  },
-
-  getEvents: async (id: string) => {
-    const { data, error } = await supabase
-      .from('events')
-      .select('*')
-      .eq('publisher_id', id)
-      .order('timestamp', { ascending: false })
-      .limit(100);
-    if (error) throw error;
-    return data;
-  }
-};
-
-// Advertiser API functions
-export const advertiserAPI = {
-  create: async (advertiserData: any) => {
-    const { data, error } = await supabase
-      .from('advertisers')
-      .insert(advertiserData)
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
-  },
-
-  getById: async (id: string) => {
-    const { data, error } = await supabase
-      .from('advertisers')
-      .select('*')
-      .eq('id', id)
-      .single();
-    if (error) throw error;
-    return data;
-  },
-
-  getByUserId: async (userId: string) => {
-    const { data, error } = await supabase
-      .from('advertisers')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
-    if (error) throw error;
-    return data;
-  },
-
-  update: async (id: string, updates: any) => {
-    const { data, error } = await supabase
-      .from('advertisers')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
-  }
-};
-
-// User rewards API functions
-export const rewardsAPI = {
-  getUserRewards: async (userId: string) => {
-    const { data, error } = await supabase
-      .from('user_rewards')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    return data;
-  },
-
-  getTotalRewards: async (userId: string) => {
-    const { data, error } = await supabase
-      .from('user_rewards')
-      .select('amount')
-      .eq('user_id', userId)
-      .eq('status', 'completed');
-    if (error) throw error;
-    return data?.reduce((sum, r) => sum + r.amount, 0) || 0;
-  },
-
-  getPendingRewards: async (userId: string) => {
-    const { data, error } = await supabase
-      .from('user_rewards')
-      .select('amount')
-      .eq('user_id', userId)
-      .eq('status', 'pending');
-    if (error) throw error;
-    return data?.reduce((sum, r) => sum + r.amount, 0) || 0;
-  }
-};
-
-// Transactions API functions
-export const transactionsAPI = {
-  getAll: async (userId: string) => {
-    const { data, error } = await supabase
-      .from('transactions')
-      .select('*')
-      .or(`from_user_id.eq.${userId},to_user_id.eq.${userId}`)
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    return data;
-  },
-
-  create: async (transactionData: any) => {
-    const { data, error } = await supabase
-      .from('transactions')
-      .insert(transactionData)
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
-  }
-};
-
-// Consent API functions
-export const consentAPI = {
-  getUserConsents: async (userId: string) => {
-    const { data, error } = await supabase
-      .from('consents')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('is_active', true);
-    if (error) throw error;
-    return data;
-  },
-
-  grantConsent: async (consentData: any) => {
-    const { data, error } = await supabase
-      .from('consents')
-      .insert(consentData)
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
-  },
-
-  revokeConsent: async (consentId: string) => {
-    const { data, error } = await supabase
-      .from('consents')
-      .update({ is_active: false, revoked_at: new Date().toISOString() })
-      .eq('id', consentId)
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
-  }
-};
-
-// Analytics API functions
-export const analyticsAPI = {
-  getDashboardStats: async (userId: string, role: UserRole) => {
-    if (role === 'advertiser') {
-      const { data: campaigns } = await supabase
-        .from('campaigns')
-        .select('impressions, clicks, conversions, spent, budget')
-        .eq('advertiser_id', userId);
-      
-      return {
-        totalCampaigns: campaigns?.length || 0,
-        totalImpressions: campaigns?.reduce((sum, c) => sum + c.impressions, 0) || 0,
-        totalClicks: campaigns?.reduce((sum, c) => sum + c.clicks, 0) || 0,
-        totalConversions: campaigns?.reduce((sum, c) => sum + c.conversions, 0) || 0,
-        totalSpent: campaigns?.reduce((sum, c) => sum + c.spent, 0) || 0,
-      };
-    } else if (role === 'publisher') {
-      const { data: publisher } = await supabase
-        .from('publishers')
-        .select('total_impressions, total_clicks, total_earnings')
-        .eq('user_id', userId)
-        .single();
-      
-      return {
-        totalImpressions: publisher?.total_impressions || 0,
-        totalClicks: publisher?.total_clicks || 0,
-        totalEarnings: publisher?.total_earnings || 0,
-      };
-    } else if (role === 'user') {
-      const { data: rewards } = await supabase
-        .from('user_rewards')
-        .select('amount, status')
-        .eq('user_id', userId);
-      
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('token_balance')
-        .eq('id', userId)
-        .single();
-      
-      return {
-        totalEarned: rewards?.filter(r => r.status === 'completed').reduce((sum, r) => sum + r.amount, 0) || 0,
-        pendingRewards: rewards?.filter(r => r.status === 'pending').reduce((sum, r) => sum + r.amount, 0) || 0,
-        tokenBalance: profile?.token_balance || 0,
-      };
-    }
-    
-    return {};
-  },
-
-  getAdminStats: async () => {
-    const [
-      { count: totalUsers },
-      { count: totalCampaigns },
-      { count: totalPublishers },
-      { data: transactions }
-    ] = await Promise.all([
-      supabase.from('profiles').select('*', { count: 'exact', head: true }),
-      supabase.from('campaigns').select('*', { count: 'exact', head: true }),
-      supabase.from('publishers').select('*', { count: 'exact', head: true }),
-      supabase.from('transactions').select('amount').eq('status', 'completed'),
-    ]);
-
-    return {
-      totalUsers: totalUsers || 0,
-      totalCampaigns: totalCampaigns || 0,
-      totalPublishers: totalPublishers || 0,
-      totalRevenue: transactions?.reduce((sum, t) => sum + t.amount, 0) || 0,
-    };
-  }
-};
-
-// Marketplace API functions
-export const marketplaceAPI = {
-  requestAd: async (adRequest: { publisherId: string; slotId: string; userId?: string }) => {
-    // Get active campaigns that match the request
-    const { data: campaigns, error } = await supabase
-      .from('campaigns')
-      .select('*, ad_creatives(*)')
-      .eq('status', 'active')
-      .gt('budget', 0)
-      .limit(10);
-    
-    if (error) throw error;
-    
-    // Simple matching logic - in production this would be ML-based
-    if (campaigns && campaigns.length > 0) {
-      const selectedCampaign = campaigns[Math.floor(Math.random() * campaigns.length)];
-      return {
-        campaign: selectedCampaign,
-        creative: selectedCampaign.ad_creatives?.[0] || null,
-      };
-    }
-    
-    return null;
-  },
-
-  getActiveCampaigns: async () => {
-    const { data, error } = await supabase
-      .from('campaigns')
-      .select('*')
-      .eq('status', 'active')
-      .gt('budget', 0);
-    if (error) throw error;
-    return data;
-  }
-};
-
-// Ad Creatives API functions
-export const creativesAPI = {
-  create: async (creativeData: any) => {
-    const { data, error } = await supabase
-      .from('ad_creatives')
-      .insert(creativeData)
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
-  },
-
-  getByCampaign: async (campaignId: string) => {
-    const { data, error } = await supabase
-      .from('ad_creatives')
-      .select('*')
-      .eq('campaign_id', campaignId);
-    if (error) throw error;
-    return data;
-  },
-
-  update: async (id: string, updates: any) => {
-    const { data, error } = await supabase
-      .from('ad_creatives')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
-  },
-
-  delete: async (id: string) => {
-    const { error } = await supabase
-      .from('ad_creatives')
-      .delete()
-      .eq('id', id);
-    if (error) throw error;
-  }
-};
-
-// Platform settings API
-export const settingsAPI = {
-  get: async (key: string) => {
-    const { data, error } = await supabase
-      .from('platform_settings')
-      .select('value')
-      .eq('key', key)
-      .single();
-    if (error) throw error;
-    return data?.value;
-  },
-
-  getAll: async () => {
-    const { data, error } = await supabase
-      .from('platform_settings')
-      .select('*');
-    if (error) throw error;
-    return data;
-  }
-};
 
 export default AuthContext;

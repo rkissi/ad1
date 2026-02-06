@@ -45,7 +45,10 @@ import {
   Globe,
   Loader2
 } from 'lucide-react';
-import { useAuthSafe, campaignAPI, analyticsAPI, creativesAPI } from '@/lib/auth-context';
+import { useAuthSafe } from '@/lib/auth-context';
+import { campaignAPI } from '@/lib/api/campaigns';
+import { analyticsAPI } from '@/lib/api/analytics';
+import { creativesAPI } from '@/lib/api/creatives';
 import type { Campaign } from '@/types/supabase';
 import BlockchainEscrowIntegration from './BlockchainEscrowIntegration';
 
