@@ -37,7 +37,9 @@ import {
   Activity,
   Loader2
 } from 'lucide-react';
-import { useAuthSafe, publisherAPI, analyticsAPI } from '@/lib/auth-context';
+import { useAuthSafe } from '@/lib/auth-context';
+import { publisherAPI } from '@/lib/api/publishers';
+import { analyticsAPI } from '@/lib/api/analytics';
 import { marketplaceService } from '@/lib/marketplace-service';
 import type { Publisher } from '@/types/supabase';
 

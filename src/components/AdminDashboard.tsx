@@ -14,7 +14,8 @@ import {
   CreditCard, BarChart3, Shield, Database, Activity, Loader2 
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { useAuthSafe, analyticsAPI } from '@/lib/auth-context';
+import { useAuthSafe } from '@/lib/auth-context';
+import { analyticsAPI } from '@/lib/api/analytics';
 import { Navbar } from '@/components/ui/navbar';
 
 interface AdminStats {
