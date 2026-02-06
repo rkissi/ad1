@@ -15,7 +15,13 @@ export class DatabaseService {
   private pool: Pool;
   private isConnected: boolean = false;
 
+  /**
+   * @deprecated This service is being replaced by Supabase Native integration.
+   * Please use src/lib/supabase-database.ts and Supabase Client instead.
+   */
   constructor(config?: DatabaseConfig) {
+    console.warn('⚠️ DEPRECATED: DatabaseService is using legacy PostgreSQL connection. Please migrate to Supabase Native.');
+
     // Use environment variables or fallback to local development
     const dbConfig = config || {
       host: process.env.DB_HOST || 'localhost',
