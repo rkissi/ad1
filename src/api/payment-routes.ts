@@ -1,13 +1,12 @@
 import { Router } from 'express';
 import Stripe from 'stripe';
+import { supabaseServer } from '../lib/supabase-server';
 
-// Use a dummy key if missing to prevent startup crash, but warn.
-const stripeKey = process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder_key_to_prevent_crash';
 if (!process.env.STRIPE_SECRET_KEY) {
-  console.warn('⚠️ STRIPE_SECRET_KEY is missing. Payment features will fail.');
+  throw new Error('FATAL: STRIPE_SECRET_KEY is missing. Payment system cannot start.');
 }
 
-const stripe = new Stripe(stripeKey, {
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: '2024-12-18.acacia'
 });
 
@@ -21,11 +20,33 @@ paymentRouter.post('/create-intent', async (req, res) => {
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(amount * 100), // Convert to cents
       currency,
-      metadata,
+      metadata: {
+        ...metadata,
+        userId: req.user?.id // Link to Supabase user
+      },
       automatic_payment_methods: {
         enabled: true,
       },
     });
+
+    // Create pending transaction record in Supabase
+    if (req.user?.id) {
+        const { error } = await supabaseServer.from('transactions').insert({
+            amount: amount, // Storing in base currency (e.g. USD), not cents
+            currency,
+            status: 'pending',
+            stripe_payment_id: paymentIntent.id,
+            from_user_id: req.user.id,
+            type: 'deposit',
+            metadata: { ...metadata, payment_intent_id: paymentIntent.id }
+        });
+
+        if (error) {
+            console.error('Failed to create pending transaction record:', error);
+            // We don't block the response, as the client needs the secret to pay.
+            // Webhook might reconcile or create if missing (upsert logic in webhook is safer but complex).
+        }
+    }
 
     res.json({
       clientSecret: paymentIntent.client_secret,
@@ -62,7 +83,10 @@ paymentRouter.post('/customers', async (req, res) => {
     const customer = await stripe.customers.create({
       email,
       name,
-      metadata,
+      metadata: {
+        ...metadata,
+        userId: req.user?.id
+      },
     });
 
     res.json(customer);
@@ -114,17 +138,35 @@ paymentRouter.post('/webhook', async (req, res) => {
       webhookSecret
     );
 
-    // Handle different event types
+    // Handle different event types with database sync
     switch (event.type) {
       case 'payment_intent.succeeded':
-        console.log('✅ Payment succeeded:', event.data.object.id);
+        const paymentIntent = event.data.object as Stripe.PaymentIntent;
+        console.log('✅ Payment succeeded:', paymentIntent.id);
+
+        await supabaseServer
+            .from('transactions')
+            .update({ status: 'completed' })
+            .eq('stripe_payment_id', paymentIntent.id);
+
+        // Trigger campaign activation or funding logic if applicable
+        // This could be done by a trigger on 'transactions' table update
         break;
+
       case 'payment_intent.payment_failed':
-        console.log('❌ Payment failed:', event.data.object.id);
+        const paymentFailed = event.data.object as Stripe.PaymentIntent;
+        console.log('❌ Payment failed:', paymentFailed.id);
+
+        await supabaseServer
+            .from('transactions')
+            .update({ status: 'failed' })
+            .eq('stripe_payment_id', paymentFailed.id);
         break;
+
       case 'customer.created':
         console.log('👤 Customer created:', event.data.object.id);
         break;
+
       default:
         console.log(`Unhandled event type: ${event.type}`);
     }

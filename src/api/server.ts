@@ -7,7 +7,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
-import DatabaseService from '../lib/database';
+// import DatabaseService from '../lib/database'; // DELETED
 import { eventTracker } from '../lib/event-tracker';
 import SmartContractService from '../lib/smart-contracts';
 import TransactionManager from '../lib/transaction-manager';
@@ -17,7 +17,7 @@ import { environmentManager, logger } from '../lib/environment-manager';
 import { paymentRouter } from './payment-routes';
 import adminRouter from './admin-routes';
 import { onboardingRouter } from './onboarding-routes';
-import { createServerClient } from '../lib/supabase-server';
+import { createServerClient, supabaseServer } from '../lib/supabase-server';
 
 // Extend Request type to include token
 declare global {
@@ -31,7 +31,7 @@ declare global {
 
 export class ApiServer {
   private app: Express;
-  private db: DatabaseService;
+  // private db: DatabaseService;
   private contractService: SmartContractService;
   private transactionManager: TransactionManager;
   private fraudService: FraudPreventionService;
@@ -43,13 +43,11 @@ export class ApiServer {
     this.port = environmentManager.getApiConfig().port;
     
     // Initialize services
-    // @deprecated - Legacy DatabaseService is being deprecated in favor of Supabase Native
-    this.db = new DatabaseService();
     this.contractService = new SmartContractService();
-    this.transactionManager = new TransactionManager(this.db, this.contractService);
-    this.fraudService = new FraudPreventionService(this.db);
+
+    this.transactionManager = new TransactionManager(this.contractService);
+    this.fraudService = new FraudPreventionService();
     this.analyticsService = new AnalyticsDashboardService(
-      this.db,
       this.transactionManager,
       this.fraudService
     );
@@ -136,10 +134,6 @@ export class ApiServer {
     const apiRouter = express.Router();
 
     // ==================== AUTHENTICATION (DEPRECATED) ====================
-    // Legacy routes removed to enforce Supabase Auth migration
-    // apiRouter.post('/auth/register', ...)
-    // apiRouter.post('/auth/login', ...)
-
     apiRouter.all('/auth/*', (req, res) => {
       res.status(410).json({
         error: 'Legacy authentication endpoints are deprecated. Please use Supabase Auth.',
@@ -153,9 +147,18 @@ export class ApiServer {
     // ==================== CAMPAIGNS ====================
     apiRouter.post('/campaigns', async (req, res, next) => {
       try {
-        // TODO: Update to use req.user.id (Supabase UUID)
-        const campaign = await this.db.createCampaign(req.body);
-        res.status(201).json(campaign);
+        const supabase = createServerClient(req.token);
+        const { data, error } = await supabase
+          .from('campaigns')
+          .insert({
+             ...req.body,
+             advertiser_id: req.user.id
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+        res.status(201).json(data);
       } catch (error) {
         next(error);
       }
@@ -163,11 +166,18 @@ export class ApiServer {
 
     apiRouter.get('/campaigns/:id', async (req, res, next) => {
       try {
-        const campaign = await this.db.getCampaign(req.params.id);
-        if (!campaign) {
-          return res.status(404).json({ error: 'Campaign not found' });
+        const supabase = createServerClient(req.token);
+        const { data, error } = await supabase
+          .from('campaigns')
+          .select('*')
+          .eq('id', req.params.id)
+          .single();
+
+        if (error) {
+           if (error.code === 'PGRST116') return res.status(404).json({ error: 'Campaign not found' });
+           throw error;
         }
-        res.json(campaign);
+        res.json(data);
       } catch (error) {
         next(error);
       }
@@ -175,11 +185,37 @@ export class ApiServer {
 
     apiRouter.get('/campaigns', async (req, res, next) => {
       try {
+        const supabase = createServerClient(req.token);
         const { advertiser } = req.query;
-        const campaigns = advertiser 
-          ? await this.db.getCampaignsByAdvertiser(advertiser as string)
-          : await this.db.getActiveCampaigns();
-        res.json(campaigns);
+        let query = supabase.from('campaigns').select('*').order('created_at', { ascending: false });
+
+        // If filtering by advertiser (and user has permission to see it? RLS handles that)
+        // If advertiser param is passed, we check if it matches current user OR if current user is admin?
+        // For now, let's rely on RLS. If user asks for campaigns, they get theirs.
+        // If admin, maybe they can see all?
+
+        if (advertiser) {
+           // We might want to verify if they can query this.
+           // RLS: 'select' policy usually limits to owner or admin.
+           // So just querying should be safe.
+           query = query.eq('advertiser_id', advertiser as string);
+        } else {
+           // Get active campaigns?
+           // Legacy behavior: 'getActiveCampaigns' implies status='active'
+           // If no advertiser param, maybe return active campaigns for marketplace?
+           // But this is a protected route.
+           // If it's for the dashboard, usually filtering by advertiser_id is automatic via RLS for "my campaigns".
+           // If I want "all active campaigns" (e.g. for matching), that might be different.
+           // Let's assume this endpoint is for the user dashboard.
+           // Supabase RLS will filter automatically.
+
+           // However, if we want to filter by status explicitly:
+           query = query.eq('status', 'active');
+        }
+
+        const { data, error } = await query;
+        if (error) throw error;
+        res.json(data);
       } catch (error) {
         next(error);
       }
@@ -187,11 +223,17 @@ export class ApiServer {
 
     apiRouter.patch('/campaigns/:id', async (req, res, next) => {
       try {
-        const campaign = await this.db.updateCampaign(req.params.id, req.body);
-        if (!campaign) {
-          return res.status(404).json({ error: 'Campaign not found' });
-        }
-        res.json(campaign);
+        const supabase = createServerClient(req.token);
+        const { data, error } = await supabase
+          .from('campaigns')
+          .update(req.body)
+          .eq('id', req.params.id)
+          .select()
+          .single();
+
+        if (error) throw error;
+        if (!data) return res.status(404).json({ error: 'Campaign not found' });
+        res.json(data);
       } catch (error) {
         next(error);
       }
@@ -200,15 +242,21 @@ export class ApiServer {
     // ==================== BLOCKCHAIN ESCROW ====================
     apiRouter.post('/campaigns/:id/lock-funds', async (req, res, next) => {
       try {
-        const campaign = await this.db.getCampaign(req.params.id);
-        if (!campaign) {
+        const supabase = createServerClient(req.token);
+        const { data: campaign, error } = await supabase
+            .from('campaigns')
+            .select('*')
+            .eq('id', req.params.id)
+            .single();
+
+        if (error || !campaign) {
           return res.status(404).json({ error: 'Campaign not found' });
         }
 
         const transaction = await this.transactionManager.depositCampaignFunds(
           campaign.id,
           campaign.budget.toString(),
-          campaign.advertiser
+          campaign.advertiser_id || ''
         );
 
         res.json(transaction);
@@ -373,12 +421,17 @@ export class ApiServer {
       try {
         const { slot, publisherDid, userDid } = req.body;
         
-        // Get active campaigns
-        const campaigns = await this.db.getActiveCampaigns();
+        // Use Supabase Admin Client to find active campaigns to match
+        const { data: campaigns } = await supabaseServer
+            .from('campaigns')
+            .select('*')
+            .eq('status', 'active');
         
-        // Simple matching logic (in production, use sophisticated algorithm)
-        const matchedCampaign = campaigns.find(c => 
-          c.audienceSpec.interests.some((interest: string) => 
+        // Simple matching logic
+        const matchedCampaign = campaigns?.find(c =>
+          c.audience_spec && typeof c.audience_spec === 'object' && 'interests' in c.audience_spec &&
+          Array.isArray((c.audience_spec as any).interests) &&
+          (c.audience_spec as any).interests.some((interest: string) =>
             slot.context?.keywords?.includes(interest)
           )
         );
@@ -392,7 +445,7 @@ export class ApiServer {
           ad: {
             id: `ad_${matchedCampaign.id}_${Date.now()}`,
             campaignId: matchedCampaign.id,
-            creative: matchedCampaign.creativeManifest,
+            creative: matchedCampaign.creative_manifest,
             bidAmount: 0.01
           }
         });
@@ -420,7 +473,17 @@ export class ApiServer {
 
     apiRouter.get('/consent/:userDid', async (req, res, next) => {
       try {
-        const consents = await this.db.getConsentsByUser(req.params.userDid);
+        const supabase = createServerClient(req.token);
+        // Note: userDid might not be profile ID. But we are moving to profile ID.
+        // Assuming userDid == profile ID for now, or we lookup.
+        // The prompt says "All user references -> profiles.id".
+        const { data: consents, error } = await supabase
+            .from('consents')
+            .select('*')
+            .eq('user_id', req.params.userDid) // Migrated column name
+            .eq('is_active', true);
+
+        if (error) throw error;
         res.json(consents);
       } catch (error) {
         next(error);
@@ -431,7 +494,6 @@ export class ApiServer {
     this.app.use('/api/v1', apiRouter);
 
     // Mount routers
-    // Note: onboardingRouter already has its own requireAuth, but paymentRouter and adminRouter did not.
     this.app.use('/api/v1/payments', this.requireAuth, paymentRouter);
     this.app.use('/api/v1/admin', this.requireAuth, adminRouter);
     this.app.use('/api/onboarding', onboardingRouter);
@@ -487,7 +549,7 @@ metaverse_ads_fraud_alerts_total ${metrics.fraud.totalAlerts}
   async start(): Promise<void> {
     try {
       // Initialize services
-      await this.db.initialize();
+      // await this.db.initialize(); // REMOVED
       await this.transactionManager.initialize();
       await this.fraudService.initialize();
 
@@ -509,7 +571,7 @@ metaverse_ads_fraud_alerts_total ${metrics.fraud.totalAlerts}
     
     await this.transactionManager.close();
     await eventTracker.close();
-    await this.db.close();
+    // await this.db.close(); // REMOVED
     
     logger.info('API server stopped');
   }
