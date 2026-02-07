@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 
-// Determine if we're in production or development
-const isProduction = import.meta.env.PROD;
+// Always use the Express API since we deploy it to Vercel
+// const isProduction = import.meta.env.PROD;
 
 interface OnboardingResponse {
   success?: boolean;
@@ -23,35 +23,7 @@ async function getAuthToken(): Promise<string> {
   return token;
 }
 
-// Call onboarding via Edge Function
-async function callEdgeFunction(action: string, data?: Record<string, any>): Promise<OnboardingResponse> {
-  try {
-    const token = await getAuthToken();
-
-    const { data: response, error } = await supabase.functions.invoke('supabase-functions-onboarding', {
-      body: { action, ...data },
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    if (error) {
-      console.error('Edge function error:', error);
-      throw new Error(error.message || 'Onboarding request failed');
-    }
-
-    if (response && response.error) {
-       throw new Error(response.error);
-    }
-
-    return response;
-  } catch (error: any) {
-    console.error('Onboarding Edge Function Error:', error);
-    throw error;
-  }
-}
-
-// Call onboarding via Express API (for local dev)
+// Call onboarding via Express API
 async function callExpressApi(endpoint: string, options: RequestInit = {}): Promise<OnboardingResponse> {
   try {
     const token = await getAuthToken();
@@ -89,23 +61,14 @@ async function callExpressApi(endpoint: string, options: RequestInit = {}): Prom
 
 export const onboardingService = {
   async getStatus(): Promise<OnboardingResponse> {
-    if (isProduction) {
-      return callEdgeFunction('status');
-    }
     return callExpressApi('/status');
   },
 
   async start(): Promise<OnboardingResponse> {
-    if (isProduction) {
-      return callEdgeFunction('start');
-    }
     return callExpressApi('/start', { method: 'POST' });
   },
 
   async saveStep(step: string, data: Record<string, any>): Promise<OnboardingResponse> {
-    if (isProduction) {
-      return callEdgeFunction('step', { step, data });
-    }
     return callExpressApi('/step', {
       method: 'POST',
       body: JSON.stringify({ step, data }),
@@ -113,9 +76,6 @@ export const onboardingService = {
   },
 
   async complete(): Promise<OnboardingResponse> {
-    if (isProduction) {
-      return callEdgeFunction('complete');
-    }
     return callExpressApi('/complete', { method: 'POST' });
   },
 };
