@@ -20,7 +20,14 @@ export async function authenticatedFetch(endpoint: string, options: RequestInit 
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const url = `${API_BASE_URL}${endpoint}`;
+  // Ensure endpoint starts with / if not present
+  const safeEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+
+  // Construct URL
+  // If we are in local dev (Vite), /api proxies to localhost:3001
+  // If we are in production (Vercel), /api rewrites to serverless function
+  const url = `${API_BASE_URL}${safeEndpoint}`;
+
   const response = await fetch(url, {
     ...options,
     headers,

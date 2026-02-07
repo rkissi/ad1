@@ -69,7 +69,8 @@ class PaymentService {
   private apiUrl: string;
 
   constructor() {
-    this.apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+    // Use relative path to support proxying/rewrites
+    this.apiUrl = '';
     this.initializeStripe();
   }
 

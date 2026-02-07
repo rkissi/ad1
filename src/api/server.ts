@@ -30,7 +30,7 @@ declare global {
 }
 
 export class ApiServer {
-  private app: Express;
+  public app: Express;
   // private db: DatabaseService;
   private contractService: SmartContractService;
   private transactionManager: TransactionManager;

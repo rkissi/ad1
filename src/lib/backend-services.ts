@@ -1,7 +1,8 @@
 // Backend Services with Enterprise Error Handling
 // Centralized API service with role-based access control
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+// Use relative path to support proxying/rewrites
+const API_BASE_URL = '';
 
 export interface ApiResponse<T = any> {
   success: boolean;
