@@ -2,6 +2,7 @@
 // Handles real payment processing, subscriptions, and transaction management
 
 import { loadStripe, Stripe } from '@stripe/stripe-js';
+import { supabase } from './supabase';
 
 export interface PaymentIntent {
   id: string;
@@ -66,11 +67,9 @@ export interface Refund {
 class PaymentService {
   private stripe: Stripe | null = null;
   private apiUrl: string;
-  private token: string | null = null;
 
   constructor() {
     this.apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-    this.token = localStorage.getItem('auth_token');
     this.initializeStripe();
   }
 
@@ -87,14 +86,20 @@ class PaymentService {
     }
   }
 
+  private async getAuthToken(): Promise<string | null> {
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token || null;
+  }
+
   private async request(endpoint: string, options: RequestInit = {}) {
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
       ...options.headers,
     };
 
-    if (this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`;
+    const token = await this.getAuthToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
     }
 
     try {

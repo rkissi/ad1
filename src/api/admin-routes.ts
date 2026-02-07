@@ -24,12 +24,18 @@ const requireAdmin = async (req: any, res: any, next: any) => {
         .eq('id', req.user.id)
         .single();
 
-     if (error || !profile) {
-        console.error('Admin check failed:', error);
+     if (error) {
+        console.error(`Admin check failed for user ${req.user.id}:`, error);
         return res.status(403).json({ error: 'Access denied' });
      }
 
+     if (!profile) {
+        console.warn(`Profile not found for user ${req.user.id} during admin check`);
+        return res.status(403).json({ error: 'Profile not found' });
+     }
+
      if (profile.role !== 'admin') {
+        console.warn(`User ${req.user.id} attempted admin access with role ${profile.role}`);
         return res.status(403).json({ error: 'Admin access required' });
      }
 
