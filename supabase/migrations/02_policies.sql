@@ -26,12 +26,25 @@ ALTER TABLE public.emergency_controls ENABLE ROW LEVEL SECURITY;
 -- ==========================================
 
 -- Helper to check if user is admin via JWT metadata (prevents recursion)
+-- Helper functions are defined in separate migrations (e.g., 20240524_rbac_helpers.sql)
+-- but for completeness in this baseline file, we can include the secure definition here if this file is run first.
+-- However, we assume the helper migration is applied or we redefine it here securely.
+
+-- Secure is_admin implementation (idempotent if already defined securely)
 CREATE OR REPLACE FUNCTION public.is_admin()
-RETURNS BOOLEAN AS $$
-BEGIN
-  RETURN (auth.jwt() ->> 'role') = 'admin';
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.profiles
+    WHERE id = auth.uid()
+      AND role = 'admin'
+  );
+$$;
 
 -- ==========================================
 -- 3. POLICIES
@@ -48,7 +61,7 @@ BEGIN
     EXECUTE $sql$
       CREATE POLICY profiles_admin_select ON public.profiles
         FOR SELECT USING (
-          auth.jwt() ->> 'role' = 'admin'
+          public.is_admin()
           OR id = auth.uid()
         );
     $sql$;
@@ -100,7 +113,7 @@ BEGIN
     EXECUTE $sql$
       CREATE POLICY campaigns_admin_all ON public.campaigns
         FOR ALL USING (
-          auth.jwt() ->> 'role' = 'admin'
+          public.is_admin()
         );
     $sql$;
   END IF;
@@ -148,7 +161,7 @@ BEGIN
     EXECUTE $sql$
       CREATE POLICY advertisers_admin_select ON public.advertisers
         FOR SELECT USING (
-          auth.jwt() ->> 'role' = 'admin'
+          public.is_admin()
         );
     $sql$;
   END IF;
@@ -181,7 +194,7 @@ BEGIN
     EXECUTE $sql$
       CREATE POLICY publishers_admin_select ON public.publishers
         FOR SELECT USING (
-          auth.jwt() ->> 'role' = 'admin'
+          public.is_admin()
         );
     $sql$;
   END IF;
@@ -371,7 +384,7 @@ BEGIN
     EXECUTE $sql$
       CREATE POLICY platform_settings_admin_all ON public.platform_settings
         FOR ALL USING (
-          auth.jwt() ->> 'role' = 'admin'
+          public.is_admin()
         );
     $sql$;
   END IF;
@@ -404,7 +417,7 @@ BEGIN
     EXECUTE $sql$
       CREATE POLICY consent_audit_log_admin_select ON public.consent_audit_log
         FOR SELECT USING (
-          auth.jwt() ->> 'role' = 'admin'
+          public.is_admin()
         );
     $sql$;
   END IF;
@@ -422,7 +435,7 @@ BEGIN
     EXECUTE $sql$
       CREATE POLICY publisher_trust_scores_admin_select ON public.publisher_trust_scores
         FOR SELECT USING (
-          auth.jwt() ->> 'role' = 'admin'
+          public.is_admin()
         );
     $sql$;
   END IF;
@@ -440,7 +453,7 @@ BEGIN
     EXECUTE $sql$
       CREATE POLICY emergency_controls_admin_all ON public.emergency_controls
         FOR ALL USING (
-          auth.jwt() ->> 'role' = 'admin'
+          public.is_admin()
         );
     $sql$;
   END IF;
